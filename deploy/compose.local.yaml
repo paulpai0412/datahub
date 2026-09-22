@@ -1,0 +1,88 @@
+# Local development overlay; never edit the pinned upstream compose file.
+services:
+  mysql:
+    ports: !reset []
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run scripts/init-local.py}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run scripts/init-local.py}
+
+  kafka-broker:
+    ports: !reset []
+    restart: unless-stopped
+
+  opensearch:
+    ports: !reset []
+    restart: unless-stopped
+    healthcheck:
+      # Exec form keeps '&' in the URL and lets Docker wait for curl itself.
+      # CMD-SHELL backgrounds curl at '&', orphaning it under Java PID 1.
+      test:
+        [
+          CMD,
+          curl,
+          -sS,
+          --fail,
+          "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=0s",
+        ]
+
+  system-update-quickstart:
+    environment:
+      EBEAN_DATASOURCE_USERNAME: datahub
+      EBEAN_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:?Run scripts/init-local.py}
+    volumes: !override
+      - ./.local/plugins:/etc/datahub/plugins:ro
+
+  datahub-gms-quickstart:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:18080:8080"
+    environment:
+      EBEAN_DATASOURCE_USERNAME: datahub
+      EBEAN_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:?Run scripts/init-local.py}
+      METADATA_SERVICE_AUTH_ENABLED: "true"
+      DATAHUB_TELEMETRY_ENABLED: "false"
+    volumes: !override
+      - ./.local/plugins:/etc/datahub/plugins:ro
+      - ./.local/search:/etc/datahub/search:ro
+
+  frontend-quickstart:
+    restart: unless-stopped
+    ports: !override
+      - "127.0.0.1:9002:9002"
+    environment:
+      DATAHUB_SECRET: ${DATAHUB_SECRET:?Run scripts/init-local.py}
+      METADATA_SERVICE_AUTH_ENABLED: "true"
+      DATAHUB_ANALYTICS_ENABLED: "false"
+      ELASTIC_CLIENT_HOST: search
+    healthcheck:
+      test: [CMD-SHELL, "curl -fsS http://localhost:9002/login >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
+    volumes: !override
+      - ./.local/plugins:/etc/datahub/plugins:ro
+      - ./.local/user.props:/datahub-frontend/conf/user.props:ro
+
+  datahub-actions-quickstart:
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      DATAHUB_SYSTEM_CLIENT_SECRET: ${DATAHUB_SYSTEM_CLIENT_SECRET:?Run scripts/init-local.py}
+      DATAHUB_TELEMETRY_ENABLED: "false"
+    # The official quickstart mounts ~/.aws; this installation must not.
+    # pi-lens-ignore: YAML:0
+    volumes: !reset []
+
+networks:
+  default:
+    name: ekop-datahub-network
+volumes:
+  broker:
+    name: ekop-datahub-broker
+  mysqldata:
+    name: ekop-datahub-mysql
+  osdata:
+    name: ekop-datahub-opensearch

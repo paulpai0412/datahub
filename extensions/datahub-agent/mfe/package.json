@@ -1,0 +1,8 @@
+{
+  "name": "datahub-agent-mfe",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "scripts": { "build": "webpack --mode production", "test": "node --test mount.test.mjs" },
+  "devDependencies": { "webpack": "5.110.3", "webpack-cli": "7.2.3" }
+}

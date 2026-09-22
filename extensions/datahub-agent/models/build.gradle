@@ -1,0 +1,73 @@
+// Independent model extension: follows metadata-models-custom/modelArtifact.
+// Compile against the exact deployed GMS model libraries, not a mismatched SDK.
+buildscript {
+    repositories {
+        mavenCentral()
+        maven { url = 'https://linkedin.jfrog.io/artifactory/open-source' }
+    }
+    dependencies {
+        classpath 'com.linkedin.pegasus:gradle-plugins:29.74.2'
+    }
+}
+
+apply plugin: 'java-library'
+apply plugin: 'pegasus'
+
+group = 'com.ekop'
+version = '0.1.7'
+// Keep released artifacts and generated classes intact; each model version gets
+// its own build tree, so an old jar cannot leak into the new registry ZIP.
+layout.buildDirectory = layout.projectDirectory.dir("build/${version}")
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://linkedin.jfrog.io/artifactory/open-source' }
+}
+
+if (!project.hasProperty('coreLibDir')) {
+    throw new GradleException('Pass -PcoreLibDir with verified libraries from the pinned GMS image')
+}
+def coreLibraries = fileTree(dir: project.property('coreLibDir'), include: '*.jar')
+
+dependencies {
+    compileOnly coreLibraries
+    dataModel files(
+        "${project.property('coreLibDir')}/metadata-models-data-template.jar",
+        "${project.property('coreLibDir')}/li-utils-data-template.jar"
+    )
+    dataTemplateCompile coreLibraries
+    testImplementation coreLibraries
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+pegasus.main.generationModes = [PegasusGenerationMode.PEGASUS]
+
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+}
+
+tasks.register('modelCheck', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ekop.agent.ModelRoundTripCheck'
+    jvmArgs '-XX:ActiveProcessorCount=1', '-Xmx256m'
+}
+
+tasks.register('modelArtifact', Zip) {
+    dependsOn jar
+    from(layout.buildDirectory.dir('libs')) {
+        include '*.jar'
+        exclude '*-test-data-template-*.jar'
+        into 'libs'
+    }
+    from('registry') { include '*.yml', '*.yaml' }
+    destinationDirectory = layout.buildDirectory.dir('dist')
+}
+
+check.dependsOn modelCheck
+build.dependsOn modelArtifact

@@ -1,0 +1,27 @@
+namespace com.ekop.agent
+
+import com.linkedin.common.Urn
+
+/** Human input for this run only. Ordinary RESPOND/DISMISS is never approval.
+ * A publication verdict requires its separately bound Host-prepared proposal.
+ */
+record EkopAgentDecisionResponse {
+  action: enum EkopAgentDecisionAction {
+    RESPOND,
+    DISMISS
+  }
+
+  /** Present for RESPOND; DISMISS ends the task rather than resuming it. */
+  text: optional string
+
+  /** Populated from freshly authenticated host identity, never client claims. */
+  @UrnValidation = { "entityTypes": [ "corpuser" ] }
+  actor: Urn
+
+  respondedAt: long
+
+  publicationVerdict: optional EkopAgentPublicationVerdict
+
+  /** Host enforces one typed purpose; ordinary/metadata answers cannot execute ETL. */
+  executionVerdict: optional EkopAgentExecutionVerdict
+}

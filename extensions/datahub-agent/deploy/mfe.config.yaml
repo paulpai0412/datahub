@@ -1,0 +1,14 @@
+# Public navigation configuration only; never put credentials here.
+# Official frontend reads this once at startup; path becomes /mfe/agent.
+topLevelMenuTitle: Agent
+subNavigationMode: false
+microFrontends:
+  - id: datahub-agent
+    label: Agent
+    path: /agent
+    remoteEntry: http://localhost:9041/mfe/remoteEntry.js
+    module: datahubAgentMFE/mount
+    flags:
+      enabled: true
+      showInNav: true
+    navIcon: AppWindow

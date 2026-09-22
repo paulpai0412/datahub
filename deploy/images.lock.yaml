@@ -1,0 +1,15 @@
+services:
+  datahub-actions-quickstart:
+    image: docker.io/acryldata/datahub-actions:v1.7.0.1-slim@sha256:e55fbb8938b7b33791d554c3eb10c79fde0e88720d7a4d010f88bdd68b062bd3
+  datahub-gms-quickstart:
+    image: docker.io/acryldata/datahub-gms:v1.7.0.1@sha256:74e15e982b94d0e147de41d05133ef3df48f74a1004a9c997805e0aa7e010173
+  frontend-quickstart:
+    image: docker.io/acryldata/datahub-frontend-react:v1.7.0.1@sha256:99513cc1c45e4cc053ceb0f9aeb04a3263a8a747907bb0e85cac2eb03461310d
+  kafka-broker:
+    image: docker.io/confluentinc/cp-kafka:8.2.2@sha256:8e01c0305844d6c05bfb8e86479f5f363bb6a53497625395943a9da780de67ce
+  mysql:
+    image: docker.io/library/mysql:8.2@sha256:212fe73edca5df6ff14826d5eb975c914bfb91f82a2e923f9050568f99525da1
+  opensearch:
+    image: docker.io/opensearchproject/opensearch:2.19.3@sha256:e96cc6ae1500a073d973c0906f30f7cf4d9c461f32f855f9242a2da933660cdd
+  system-update-quickstart:
+    image: docker.io/acryldata/datahub-upgrade:v1.7.0.1@sha256:c3db54d8fb94bc761be611c014c5ede3fd02daac1f15c8c177d69eceee79a24c

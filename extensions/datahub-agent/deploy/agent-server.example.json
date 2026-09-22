@@ -1,0 +1,11 @@
+{
+  "scope": "ekop-agent-local",
+  "runtimeImageId": "sha256:3374d1581eaed39c69feecf57f8b8a1822397a1150c6eb2a8db85abc7420846e",
+  "gatewayOrigin": "http://localhost:9041",
+  "datahubOrigin": "http://localhost:9002",
+  "tenant": "ekop-datahub",
+  "browserAssetsDirectory": "evidence/agent-skin/browser-assets-final",
+  "memoryMiB": 1024,
+  "cpus": 1,
+  "maxRuntimes": 2
+}

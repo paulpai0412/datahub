@@ -1,0 +1,39 @@
+namespace com.ekop.agent
+
+import com.linkedin.common.Urn
+
+/** Correlates a native dataProcessInstance with its existing Pi session.
+ * Native properties, relationships and run events retain their own semantics.
+ * A pending decision means waiting for user input, never business approval.
+ */
+@Aspect = { "name": "ekopAgentRun" }
+record EkopAgentRun {
+  @UrnValidation = { "entityTypes": [ "corpuser" ] }
+  actor: Urn
+
+  @UrnValidation = { "entityTypes": [ "dataHubIngestionSource" ] }
+  source: Urn
+
+  @UrnValidation = { "entityTypes": [ "dataJob" ] }
+  task: Urn
+
+  /** Exact task aspect version selected at run creation. */
+  taskVersion: string
+
+  /** Native Pi session identifier, not a filesystem path or access token. */
+  sessionId: string
+
+  /** Append questions; resolve each once using a conditional aspect write.
+   * Historical answers must not be edited or silently reapplied to another run.
+   * These requirements must also be enforced by the host; a schema is not a lock.
+   */
+  decisions: array[EkopAgentDecision] = []
+
+  /** Host admission is closed at this time; never remove or change it once set.
+   * Updated conditionally in the same aspect as decisions so a late submitter
+   * cannot answer or append after closure. This does NOT prove Pi has stopped;
+   * the host must separately abort and reconcile the native session.
+   * Absent on older records. Such records are not automatically resumed.
+   */
+  closedAt: optional long
+}

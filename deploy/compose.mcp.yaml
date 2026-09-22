@@ -1,0 +1,32 @@
+# Standalone opt-in overlay; never recreate Core services to start MCP.
+services:
+  datahub-mcp:
+    image: sha256:676ffc26f91b811da11ad20d0a4ad09cebc7ac7c7ff72a115f0f04eb6639f4cb
+    pull_policy: never
+    restart: unless-stopped
+    user: "10001:10001"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1
+    mem_limit: 1g
+    memswap_limit: 1g
+    pids_limit: 128
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=128m,mode=1777
+    environment:
+      HOME: /tmp/mcp-home
+      DATAHUB_GMS_URL: http://datahub-gms-quickstart:8080
+      DATAHUB_TELEMETRY_ENABLED: "false"
+      TOOLS_IS_MUTATION_ENABLED: "false"
+      TOOLS_IS_USER_ENABLED: "true"
+      DATAHUB_MCP_DOCUMENT_TOOLS_DISABLED: "true"
+      SAVE_DOCUMENT_TOOL_ENABLED: "false"
+      SEMANTIC_SEARCH_ENABLED: "false"
+    ports:
+      - "127.0.0.1:8042:8000"
+    networks: [datahub]
+networks:
+  datahub:
+    external: true
+    name: ekop-datahub-network

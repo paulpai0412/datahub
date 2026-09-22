@@ -1,0 +1,13 @@
+namespace com.ekop.agent
+
+import com.linkedin.common.Urn
+
+/** One explicit, Host-compiled Aspect mutation. Not an arbitrary SQL command.
+ * The canonical value is visible to the human reviewer; credentials are forbidden.
+ */
+record EkopAgentPublicationChange {
+  urn: Urn
+  aspect: string
+  expectedVersion: string
+  valueJson: string
+}

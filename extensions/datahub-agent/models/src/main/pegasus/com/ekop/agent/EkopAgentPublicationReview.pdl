@@ -1,0 +1,27 @@
+namespace com.ekop.agent
+
+import com.linkedin.common.Urn
+
+/** A Host-prepared publication proposal, distinct from an agent's question.
+ * Presence is not approval. The Host validates scope, canonical digest and expiry.
+ */
+record EkopAgentPublicationReview {
+  purpose: enum EkopAgentPublicationPurpose {
+    LINEAGE,
+    SEMANTIC
+  }
+  @UrnValidation = { "entityTypes": [ "dataHubIngestionSource" ] }
+  source: Urn
+  sourceId: string
+  snapshotSha256: string
+  candidateDigest: string
+  analysisVersion: string
+  candidateIds: array[string]
+  /** Same prospective Host-approved scope as the Task, not creation authority. */
+  @UrnValidation = { "entityTypes": [ "dataset" ], "exist": false }
+  datasets: array[Urn]
+  expiresAt: long
+  changes: array[EkopAgentPublicationChange]
+  /** SHA-256 of the canonical proposal, excluding this field and any response. */
+  planDigest: string
+}

@@ -1,0 +1,44 @@
+{
+  "source": {
+    "type": "mssql",
+    "config": {
+      "host_port": "host.docker.internal:14334",
+      "database": "SalesDatamart",
+      "username": "datahub_ingest",
+      "password": "${DATAHUB_MSSQL_PASSWORD}",
+      "env": "PROD",
+      "include_tables": true,
+      "include_views": true,
+      "include_stored_procedures": false,
+      "include_stored_procedures_code": false,
+      "include_jobs": false,
+      "include_query_lineage": false,
+      "include_usage_statistics": false,
+      "include_lineage": false,
+      "include_view_lineage": true,
+      "include_view_column_lineage": true,
+      "convert_urns_to_lowercase": true,
+      "convert_column_urns_to_lowercase": true,
+      "profiling": {"enabled": false},
+      "stateful_ingestion": {"enabled": false},
+      "database_pattern": {"allow": ["^SalesDatamart$"], "ignoreCase": false},
+      "schema_pattern": {"allow": ["^dm$", "^reporting$"], "ignoreCase": false},
+      "table_pattern": {
+        "allow": ["^salesdatamart\\.dm\\.(dim_date|dim_product|dim_customer|dim_territory|fact_sales_order_line)$"],
+        "ignoreCase": false
+      },
+      "view_pattern": {
+        "allow": ["^salesdatamart\\.reporting\\.v_sales_order_line$"],
+        "ignoreCase": false
+      },
+      "options": {"connect_args": {"timeout": 30, "login_timeout": 5}}
+    }
+  },
+  "sink": {
+    "type": "datahub-rest",
+    "config": {
+      "server": "http://datahub-gms:8080",
+      "token": "${DATAHUB_TOKEN}"
+    }
+  }
+}

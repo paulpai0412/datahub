@@ -1,0 +1,3 @@
+[submodule "upstream/datahub"]
+	path = upstream/datahub
+	url = https://github.com/datahub-project/datahub.git

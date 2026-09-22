@@ -1,0 +1,11 @@
+**
+!extensions/
+!extensions/datahub-agent/
+!extensions/datahub-agent/integration/
+!extensions/datahub-agent/integration/runtime-relay.mjs
+!extensions/datahub-agent/pi-web/
+!extensions/datahub-agent/pi-web/lib/
+!extensions/datahub-agent/pi-web/lib/web-auth.ts
+!tests/
+!tests/fixtures/
+!tests/fixtures/agent-runtime.mjs

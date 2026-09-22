@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DataHub Agent — UI v0 preview</title>
+    <link rel="stylesheet" href="agent-ui.css" />
+    <script type="module" src="agent-ui.mjs"></script>
+  </head>
+  <body>
+    <aside
+      class="core-reference"
+      aria-label="Existing DataHub navigation — visual reference only"
+    >
+      <img class="brand" src="assets/datahub-core.svg" alt="DataHub Core" />
+      <div class="core-item">Home</div>
+      <p class="nav-label">Context</p>
+      <div class="core-item">Documents</div>
+      <p class="nav-label">Govern</p>
+      <div class="core-item">Glossary</div>
+      <div class="core-item">Tags</div>
+      <div class="core-item">Domains</div>
+      <div class="core-item">Structured Properties</div>
+      <p class="nav-label">Admin</p>
+      <div class="core-item">Data Sources</div>
+      <div class="core-item">Analytics</div>
+      <div class="core-item selected" aria-current="page">Agent</div>
+      <div class="core-bottom">
+        <p class="nav-label">Account</p>
+        <div class="core-item">Profile</div>
+        <div class="core-item">Settings</div>
+        <div class="core-item">Resources</div>
+        <small
+          >Host navigation is a visual reference, not a live DataHub
+          session.</small
+        >
+      </div>
+    </aside>
+    <main class="agent-frame">
+      <header class="agent-header">
+        <h1>Agent</h1>
+        <div class="header-actions">
+          <button
+            id="workspace-button"
+            aria-haspopup="dialog"
+            aria-controls="history-dialog"
+          >
+            Workspace <span aria-hidden="true">⌄</span>
+          </button>
+          <button id="sources-button" data-page="sources">Sources</button>
+          <button id="settings-button" data-page="settings">Settings</button>
+        </div>
+      </header>
+      <nav class="page-tabs" aria-label="Agent pages">
+        <button data-page="chat" aria-current="page">Chat</button>
+        <button disabled title="Registry UI is planned in A14">
+          Agents <small>Planned</small>
+        </button>
+        <button disabled title="Task UI is planned in A14">
+          Tasks <small>Planned</small>
+        </button>
+        <button disabled title="Decision UI is planned in A14">
+          Decisions <small>Planned</small>
+        </button>
+      </nav>
+      <p class="preview-notice" role="status">
+        <strong>UI v0 · Not connected</strong
+        ><span
+          >Layout review only. No backend requests, saved data, or metadata
+          changes. Do not enter credentials.</span
+        >
+      </p>
+
+      <section id="chat-page" class="page" aria-label="Chat">
+        <div class="chat-toolbar">
+          <button
+            id="history-button"
+            aria-haspopup="dialog"
+            aria-controls="history-dialog"
+          >
+            History <span aria-hidden="true">⌄</span>
+          </button>
+          <button
+            disabled
+            title="Session creation is not connected in this preview"
+          >
+            ＋ New chat
+          </button>
+          <span class="session-name">New conversation</span>
+          <button
+            id="details-button"
+            aria-expanded="false"
+            aria-controls="details"
+          >
+            Details
+          </button>
+        </div>
+        <div id="workbench" class="workbench">
+          <div class="chat-column">
+            <div class="conversation">
+              <div class="welcome">
+                <p class="eyebrow">YOUR METADATA WORKSPACE</p>
+                <h2>From a question to a reviewed change.</h2>
+                <p>
+                  Explore your data, inspect lineage, and prepare ingestion in
+                  one place.
+                </p>
+                <div class="next-step">
+                  <strong>Start with your workspace and model</strong>
+                  <p>
+                    Workspace keeps sessions and files together. Models are
+                    configured in Settings; source credentials and approvals
+                    stay in the trusted parent page.
+                  </p>
+                  <button data-page="settings" class="text-button">
+                    Preview settings <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="composer-wrap">
+              <div class="composer">
+                <label class="sr-only" for="message">Message preview</label>
+                <textarea
+                  id="message"
+                  rows="3"
+                  readonly
+                  placeholder="Ask about a dataset, inspect lineage, or prepare an ingestion…"
+                ></textarea>
+                <div class="composer-tools">
+                  <div>
+                    <button disabled>Attach</button
+                    ><button disabled>Model · Not connected</button
+                    ><button disabled>Thinking</button
+                    ><button disabled>Tools</button>
+                  </div>
+                  <button disabled class="primary">Send</button>
+                </div>
+              </div>
+              <p class="composer-note">
+                Messages, files, skills, terminal, and sessions will use the
+                existing pi-web runtime. This preview does not run an agent.
+              </p>
+            </div>
+          </div>
+          <aside
+            id="details"
+            class="details"
+            hidden
+            aria-labelledby="details-heading"
+          >
+            <header class="panel-header">
+              <h2 id="details-heading" tabindex="-1">Details</h2>
+              <button id="close-details" aria-label="Close details">×</button>
+            </header>
+            <nav class="subnav" aria-label="Details views">
+              <button data-detail="files" aria-pressed="true">Files</button
+              ><button data-detail="terminal" aria-pressed="false">
+                Terminal
+              </button>
+            </nav>
+            <section id="files-detail" class="panel-body">
+              <p class="eyebrow">WORKSPACE FILES</p>
+              <h3>Your files, alongside the conversation.</h3>
+              <p>No workspace contents have been loaded in this preview.</p>
+              <button disabled>Open file</button>
+              <p class="boundary-note">
+                Uses the existing explorer, file tabs, upload, preview, and
+                watch behavior. Data, Changes, and Evidence panels are not yet
+                implemented.
+              </p>
+            </section>
+            <section id="terminal-detail" class="panel-body" hidden>
+              <p class="eyebrow">TERMINAL</p>
+              <h3>A real terminal, not a chat substitute.</h3>
+              <p>
+                The existing PTY and terminal lifecycle remain in the isolated
+                runtime. No terminal is started by this preview.
+              </p>
+              <button disabled>New terminal</button>
+              <p class="boundary-note">
+                Source secrets and approval controls do not belong in this
+                runtime surface.
+              </p>
+            </section>
+          </aside>
+        </div>
+      </section>
+
+      <section
+        id="settings-page"
+        class="page settings-page"
+        hidden
+        aria-labelledby="settings-heading"
+      >
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">AGENT / SETTINGS</p>
+            <h2 id="settings-heading" tabindex="-1">Settings</h2>
+          </div>
+          <button data-page="chat">Back to chat</button>
+        </div>
+        <nav class="settings-tabs" aria-label="Settings sections">
+          <button data-setting="general" aria-pressed="true">General</button
+          ><button data-setting="models" aria-pressed="false">Models</button
+          ><button data-setting="skills" aria-pressed="false">Skills</button
+          ><button data-setting="mcp" aria-pressed="false">MCP</button
+          ><button data-setting="profiles" aria-pressed="false">
+            Agent profiles</button
+          ><button data-setting="plugins" aria-pressed="false">Plugins</button>
+        </nav>
+        <div class="settings-content">
+          <section id="general-setting">
+            <h3>One workspace, your preferences.</h3>
+            <p>
+              The embedded interface follows DataHub. Existing language, sound,
+              notification, and appearance options remain part of the
+              integration plan.
+            </p>
+            <div class="setting-row">
+              <div>
+                <strong>Appearance</strong>
+                <p>DataHub theme · Mulish · Light</p>
+              </div>
+              <span class="badge">Deployment controlled</span>
+            </div>
+            <div class="setting-row">
+              <div>
+                <strong>Workspace scope</strong>
+                <p>
+                  Sessions, files, and runtime credentials are isolated per
+                  user.
+                </p>
+              </div>
+              <span class="badge">Not connected</span>
+            </div>
+            <footer class="attribution">
+              Based on pi-web 0.9.0 · MIT. Its original feature set is retained
+              in the runtime, not reimplemented by this preview.
+            </footer>
+          </section>
+          <section id="models-setting" hidden>
+            <h3>Models</h3>
+            <p>
+              Configure your own provider here after integration. This preview
+              never reads developer credentials and does not accept API keys.
+            </p>
+            <fieldset disabled>
+              <legend>Provider configuration preview</legend>
+              <label for="provider">Provider</label
+              ><select id="provider">
+                <option>Select a provider after integration</option></select
+              ><label for="model-key">API key</label
+              ><input
+                id="model-key"
+                type="password"
+                autocomplete="off"
+                placeholder="Disabled in preview — do not enter a real key"
+              /><label for="model-id">Model</label
+              ><input
+                id="model-id"
+                placeholder="Model discovery is not connected"
+              />
+              <div class="form-actions">
+                <button>Test connection</button
+                ><button class="primary">Save</button>
+              </div>
+            </fieldset>
+          </section>
+          <section id="skills-setting" hidden>
+            <h3>Skills</h3>
+            <p>
+              Browse, search, install, toggle, check, and update skills using
+              the existing SkillsConfig behavior.
+            </p>
+            <div class="empty-list">
+              No skill inventory loaded. This is not an empty live installation.
+            </div>
+            <p class="boundary-note">
+              A skill describes work. It does not grant source access or
+              permission to execute ingestion.
+            </p>
+          </section>
+          <section id="mcp-setting" hidden>
+            <h3>MCP servers</h3>
+            <p>
+              Configure, discover, and reload approved servers here. The new MCP
+              bridge is not connected yet.
+            </p>
+            <fieldset disabled>
+              <legend>Server configuration preview</legend>
+              <label for="mcp-url">HTTPS endpoint</label
+              ><input
+                id="mcp-url"
+                type="url"
+                placeholder="Server URL — preview only"
+              />
+              <div class="form-actions">
+                <button>Discover tools</button
+                ><button class="primary">Save</button>
+              </div>
+            </fieldset>
+            <p class="boundary-note">
+              Destination approval, SSRF checks, secret binding, and tool ACLs
+              are backend responsibilities, not a checkbox in this preview.
+            </p>
+          </section>
+          <section id="profiles-setting" hidden>
+            <h3>Agent profiles</h3>
+            <p>
+              Existing Pi agent and subagent profile configuration stays here.
+              DataHub Agent Registry is a separate feature, not a replacement
+              for these profiles.
+            </p>
+            <div class="empty-list">No profile inventory loaded.</div>
+          </section>
+          <section id="plugins-setting" hidden>
+            <h3>Plugins</h3>
+            <p>
+              Existing package management and reload controls remain available
+              in the isolated runtime after integration.
+            </p>
+            <div class="empty-list">No plugin inventory loaded.</div>
+            <p class="boundary-note">
+              Plugins and terminal access do not grant access to ingestion
+              secrets or approval controls.
+            </p>
+          </section>
+        </div>
+      </section>
+
+      <section
+        id="sources-page"
+        class="page sources-page"
+        hidden
+        aria-labelledby="sources-heading"
+      >
+        <div class="page-heading">
+          <div>
+            <p class="eyebrow">AGENT / SOURCES</p>
+            <h2 id="sources-heading" tabindex="-1">Sources</h2>
+          </div>
+          <button data-page="chat">Back to chat</button>
+        </div>
+        <div class="sources-content">
+          <div class="source-summary">
+            <h3>Configure once. Review before execution.</h3>
+            <p>
+              Source configuration, secret binding, revisions, and approval live
+              in the trusted parent page — outside the terminal and plugin
+              origin.
+            </p>
+            <ol class="source-steps">
+              <li>Configure source</li>
+              <li>Test connection</li>
+              <li>Preview metadata</li>
+              <li>Approve revision</li>
+              <li>Run and reconcile</li>
+            </ol>
+          </div>
+          <div class="source-list">
+            <div class="list-heading">
+              <h3>Source configurations</h3>
+              <button disabled>New source</button>
+            </div>
+            <div class="empty-list">
+              Source inventory has not been loaded. Existing DataHub sources are
+              not modified by this preview.
+            </div>
+            <p class="boundary-note">
+              Connection, preview, approval, run, and audit are not wired in UI
+              v0. No fake successful tests or sample run records are shown.
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="history-dialog" aria-labelledby="drawer-heading">
+      <header class="panel-header">
+        <h2 id="drawer-heading">History &amp; Workspace</h2>
+        <form method="dialog">
+          <button aria-label="Close history and workspace">×</button>
+        </form>
+      </header>
+      <nav class="subnav" aria-label="History and workspace">
+        <button data-drawer="history" aria-pressed="true">History</button
+        ><button data-drawer="workspace" aria-pressed="false">Workspace</button>
+      </nav>
+      <section id="history-drawer" class="panel-body">
+        <label for="session-search">Search conversations</label
+        ><input
+          id="session-search"
+          type="search"
+          disabled
+          placeholder="Search is not connected"
+        />
+        <div class="empty-list">No session inventory loaded.</div>
+        <p>
+          Existing rename, delete, branch, export, and session search will stay
+          here. No second permanent sidebar.
+        </p>
+      </section>
+      <section id="workspace-drawer" class="panel-body" hidden>
+        <h3>Choose where you work.</h3>
+        <p>
+          Project and worktree selection will reuse the existing workspace
+          behavior.
+        </p>
+        <label for="workspace-select">Workspace</label
+        ><select id="workspace-select" disabled>
+          <option>No workspace loaded</option>
+        </select>
+        <div class="form-actions">
+          <button disabled>Open folder</button
+          ><button disabled>New worktree</button>
+        </div>
+        <p class="boundary-note">
+          Workspace changes preserve session and draft ownership; removing a
+          dirty worktree still requires the original safeguards.
+        </p>
+      </section>
+    </dialog>
+  </body>
+</html>

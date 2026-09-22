@@ -1,0 +1,20 @@
+{
+  "name": "DataFlow SalesDatamart",
+  "uid": "dataflow-salesdatamart",
+  "type": "mssql",
+  "access": "proxy",
+  "url": "127.0.0.1:14334",
+  "user": "sales_datamart_grafana",
+  "jsonData": {
+    "database": "SalesDatamart",
+    "encrypt": "true",
+    "tlsSkipVerify": true,
+    "connectionTimeout": 5,
+    "maxOpenConns": 2,
+    "maxIdleConns": 2,
+    "connMaxLifetime": 300
+  },
+  "secureJsonData": {
+    "password": "${SALESDATAMART_GRAFANA_PASSWORD}"
+  }
+}

@@ -1,0 +1,8 @@
+# Explicit opt-in overlay; never added to compose.sh by default.
+# Uses the existing pinned frontend image; no Core patch or image build.
+services:
+  frontend-quickstart:
+    environment:
+      MFE_CONFIG_FILE_PATH: /etc/datahub-agent/mfe.config.yaml
+    volumes:
+      - ./extensions/datahub-agent/deploy/mfe.config.yaml:/etc/datahub-agent/mfe.config.yaml:ro

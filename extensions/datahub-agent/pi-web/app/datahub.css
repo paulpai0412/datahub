@@ -1,0 +1,204 @@
+/* DataHub v1.7.0.1 tokens; scoped to the presentation-only embedded build. */
+@font-face {
+ font-family: "DataHub Mulish";
+ src: url("./fonts/Mulish-Regular.ttf") format("truetype");
+ font-weight: 400;
+ font-display: swap;
+}
+@font-face {
+ font-family: "DataHub Mulish";
+ src: url("./fonts/Mulish-SemiBold.ttf") format("truetype");
+ font-weight: 600 900;
+ font-display: swap;
+}
+html[data-datahub="true"] {
+ color-scheme: light;
+ --bg: #fff;
+ --bg-panel: #fff;
+ --bg-hover: #f5f6fa;
+ --bg-selected: #ece9f8;
+ --border: #ececec;
+ --text: #374066;
+ --text-muted: #5f6685;
+ --text-dim: #5f6685;
+ --accent: #533fd1;
+ --accent-hover: #5c3fd1;
+ --accent-contrast: #fff;
+ --user-bg: #f5f6fa;
+ --assistant-bg: #fff;
+ --tool-bg: #f9fafc;
+ --bg-subtle: #f9fafc;
+}
+html[data-datahub="true"] body {
+ font-family: "DataHub Mulish", sans-serif;
+ font-size: 14px;
+}
+.datahub-header {
+ height: 56px;
+ padding: 0 20px;
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ gap: 12px;
+ border-bottom: 1px solid var(--border);
+ background: var(--bg);
+}
+.datahub-header h1 {
+ font-size: 22px;
+ font-weight: 600;
+}
+.datahub-header > div {
+ display: flex;
+ gap: 8px;
+}
+.datahub-header button,
+.datahub-drawer-close {
+ min-height: 36px;
+ padding: 6px 12px;
+ color: var(--text);
+ background: var(--bg);
+ border: 1px solid var(--border);
+ border-radius: 6px;
+ cursor: pointer;
+}
+.datahub-header button:hover,
+.datahub-drawer-close:hover {
+ background: var(--bg-selected);
+ border-color: var(--accent);
+}
+html[data-datahub="true"] button:focus-visible {
+ outline: 2px solid var(--accent);
+ outline-offset: -2px;
+}
+.datahub-drawer-close {
+ padding: 0;
+ min-width: 28px;
+ min-height: 32px;
+ font-size: 20px;
+}
+.datahub-history-toggle {
+ width: 84px !important;
+ font-size: 13px;
+}
+.datahub-details-toggle {
+ width: 86px !important;
+ gap: 6px;
+ font-size: 13px;
+}
+/* Keep the sidebar mounted: it owns polling, project/session restoration and
+   portaled directory pickers. It is a non-modal drawer, not a second navigation. */
+html[data-datahub="true"] .sidebar-container {
+ position: fixed !important;
+ top: 56px;
+ bottom: 0;
+ left: 0;
+ height: auto;
+ width: min(var(--sidebar-width, 300px), calc(100vw - 16px));
+ min-width: 0;
+ max-width: none;
+ overflow: hidden;
+ transition: transform 0.16s ease;
+}
+html[data-datahub="true"] .sidebar-container > * {
+ width: 100%;
+ min-width: 0;
+}
+html[data-datahub="true"] .sidebar-container.sidebar-open {
+ transform: translateX(0);
+ box-shadow: 0 4px 12px rgba(9, 1, 61, 0.12);
+}
+html[data-datahub="true"] .sidebar-container.sidebar-closed {
+ transform: translateX(-100%);
+ visibility: hidden;
+ pointer-events: none;
+}
+html[data-datahub="true"] .sidebar-overlay-backdrop {
+ display: block !important;
+ inset: 56px 0 0 !important;
+}
+/* Drawer resize uses the original keyboard/pointer resizer and stored width. */
+html[data-datahub="true"] .sidebar-resize-handle {
+ position: fixed;
+ top: 56px;
+ bottom: 0;
+ left: var(--sidebar-width, 260px);
+ z-index: 201;
+}
+.datahub-welcome {
+ margin: 0 auto 36px;
+ padding: 24px 32px;
+ max-width: 820px;
+}
+.datahub-welcome h2 {
+ font-size: 28px;
+ font-weight: 600;
+ line-height: 1.35;
+ margin-bottom: 12px;
+}
+.datahub-welcome p {
+ color: var(--text-muted);
+ text-wrap: pretty;
+}
+html[data-datahub="true"] .datahub-get-started {
+ inset: 0 !important;
+ padding: 36px;
+ align-items: center !important;
+ justify-content: center;
+}
+.datahub-get-started > svg {
+ display: none;
+}
+.datahub-attribution {
+ color: var(--text-muted);
+ font-size: 12px;
+ margin-top: 16px;
+}
+/* Existing settings components and their portals remain intact; only the
+   surface becomes a workspace page. Source/approval controls are NOT hosted here. */
+html[data-datahub="true"] .settings-dialog-backdrop {
+ top: 56px;
+ padding: 0;
+ background: var(--bg);
+}
+html[data-datahub="true"] .settings-dialog-surface {
+ width: 100%;
+ height: 100%;
+ max-width: none;
+ max-height: none;
+ border: 0;
+ border-radius: 0;
+ box-shadow: none;
+}
+@media (max-width: 959px) {
+ html[data-datahub="true"] .right-panel-container {
+  top: 56px;
+  height: calc(var(--app-viewport-height, 100dvh) - 56px);
+ }
+ html[data-datahub="true"] .right-panel-overlay-backdrop {
+  top: 56px;
+ }
+}
+@media (max-width: 640px) {
+ .datahub-header {
+  padding-inline: 12px;
+ }
+ .datahub-header h1 {
+  font-size: 20px;
+ }
+ .datahub-header button {
+  min-height: 44px;
+  padding-inline: 10px;
+ }
+ .datahub-welcome {
+  margin-bottom: 12px;
+  padding: 16px 24px;
+ }
+ .datahub-welcome h2 {
+  font-size: 22px;
+ }
+}
+@media (prefers-reduced-motion: reduce) {
+ html[data-datahub="true"] .sidebar-container {
+  transition: none;
+ }
+}

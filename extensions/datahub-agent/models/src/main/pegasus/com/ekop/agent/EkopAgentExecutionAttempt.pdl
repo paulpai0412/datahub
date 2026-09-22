@@ -1,0 +1,23 @@
+namespace com.ekop.agent
+
+/** Host-owned once-only ETL admission and aggregate outcome, in the same Run CAS.
+ * Admission survives process loss. UNKNOWN is not permission to dispatch again.
+ * COMMIT_AUTHORIZED is only the commit boundary, never proof of committed data.
+ */
+record EkopAgentExecutionAttempt {
+  attemptId: string
+  planDigest: string
+  admittedAt: long
+  deadlineAt: long
+  state: enum EkopAgentExecutionState {
+    ADMITTED,
+    COMMIT_AUTHORIZED,
+    COMMITTED,
+    FAILED,
+    UNKNOWN
+  }
+  commitAuthorizedAt: optional long
+  finishedAt: optional long
+  /** Host-validated aggregate receipt only; no stdout/stderr dump or credentials. */
+  resultJson: optional string
+}

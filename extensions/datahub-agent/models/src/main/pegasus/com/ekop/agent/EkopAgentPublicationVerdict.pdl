@@ -1,0 +1,14 @@
+namespace com.ekop.agent
+
+/** Typed human consent, bound to one purpose and immutable proposal digest.
+ * The enclosing response supplies freshly authenticated actor and response time.
+ * This record is not itself an execution capability or an ACL grant.
+ */
+record EkopAgentPublicationVerdict {
+  purpose: EkopAgentPublicationPurpose
+  planDigest: string
+  verdict: enum EkopAgentPublicationVerdictValue {
+    APPROVE,
+    REJECT
+  }
+}

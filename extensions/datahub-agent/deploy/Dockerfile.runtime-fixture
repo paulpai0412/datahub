@@ -1,0 +1,7 @@
+# Credential-free network/volume/transport acceptance fixture, NOT the pi-web image.
+FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d
+COPY extensions/datahub-agent/integration/runtime-relay.mjs /work/extensions/datahub-agent/integration/runtime-relay.mjs
+COPY extensions/datahub-agent/pi-web/lib/web-auth.ts /work/extensions/datahub-agent/pi-web/lib/web-auth.ts
+COPY tests/fixtures/agent-runtime.mjs /work/tests/fixtures/agent-runtime.mjs
+USER node
+CMD ["node", "/work/tests/fixtures/agent-runtime.mjs"]

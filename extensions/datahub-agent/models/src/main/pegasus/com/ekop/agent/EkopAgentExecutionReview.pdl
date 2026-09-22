@@ -1,0 +1,20 @@
+namespace com.ekop.agent
+
+import com.linkedin.common.Urn
+
+/** Host-compiled fixed ETL intent; neither metadata consent nor a command runner. */
+record EkopAgentExecutionReview {
+  purpose: EkopAgentExecutionPurpose
+  @UrnValidation = { "entityTypes": [ "dataHubIngestionSource" ] }
+  source: Urn
+  /** ETL uses existing Catalog assets; this is not source SELECT authority. */
+  @UrnValidation = { "entityTypes": [ "dataset" ] }
+  datasets: array[Urn]
+  /** Canonical fixed ID/version, source/target, scope, limits and consistency caveat.
+   * Never contains commands, paths, endpoints, credentials or data rows.
+   */
+  definitionJson: string
+  codeSha256: string
+  expiresAt: long
+  planDigest: string
+}

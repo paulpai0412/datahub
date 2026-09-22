@@ -1,0 +1,18 @@
+{
+  "registry": "ekop-agent-tasks",
+  "version": "0.1.7",
+  "coreVersion": "v1.7.0.1",
+  "coreCommit": "e99431ec510d7a2001f815c6bf70913c493af76e",
+  "gmsImage": "sha256:74e15e982b94d0e147de41d05133ef3df48f74a1004a9c997805e0aa7e010173",
+  "gmsWarSha256": "ca2df5958a1c489b7d39ad1fa5fcf6608f4d997419a1fa0e61c77f8053e89be0",
+  "gradle": "8.14.3",
+  "gradleDistribution": "https://downloads.gradle.org/distributions/gradle-8.14.3-bin.zip",
+  "gradleDistributionSha256": "bd71102213493060956ec229d946beee57158dbd89d0e62b91bca0fa2c5f3531",
+  "pegasus": "29.74.2",
+  "jdkUsed": "Temurin 21.0.12+8",
+  "buildContainer": "node@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d",
+  "coreSchemaJarSha256": {
+    "metadata-models-data-template.jar": "8f6e29dff611cd31ca9272f258e226167b239eb6baf3d065345e2a1e4fb9a856",
+    "li-utils-data-template.jar": "180b6c35205034c4d39aca6c5b99cee2c76600867f0fbd46aa7d69741ddd41d2"
+  }
+}

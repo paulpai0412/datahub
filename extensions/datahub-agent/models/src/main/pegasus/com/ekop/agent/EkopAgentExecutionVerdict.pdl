@@ -1,0 +1,8 @@
+namespace com.ekop.agent
+
+/** Typed human response to exactly one Host-compiled ETL proposal. */
+record EkopAgentExecutionVerdict {
+  purpose: EkopAgentExecutionPurpose
+  planDigest: string
+  verdict: enum EkopAgentExecutionVerdictType { APPROVE, REJECT }
+}

@@ -1,0 +1,31 @@
+namespace com.ekop.agent
+
+import com.linkedin.common.Urn
+
+/** Task instructions and scope; dataJobInfo and ownership remain native aspects.
+ * This is metadata, not a credential or an execution authorization grant.
+ */
+@Aspect = { "name": "ekopAgentTask" }
+record EkopAgentTask {
+  /** Actor whose isolated Pi workspace executes this task. */
+  @UrnValidation = { "entityTypes": [ "corpuser" ] }
+  actor: Urn
+
+  @UrnValidation = { "entityTypes": [ "aiAgent" ] }
+  agent: Urn
+
+  /** Existing approved source; not a recipe or secret value. */
+  @UrnValidation = { "entityTypes": [ "dataHubIngestionSource" ] }
+  source: Urn
+
+  /** Exact Host-approved scope, including prospective publication targets.
+   * URN syntax/type stays strict; scope is not entity creation or source SELECT authority.
+   */
+  @UrnValidation = { "entityTypes": [ "dataset" ], "exist": false }
+  datasets: array[Urn]
+
+  /** User-authored task instructions, never interpreted as authority. */
+  instructions: string
+
+  allowDecisions: boolean = true
+}

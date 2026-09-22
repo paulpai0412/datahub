@@ -1,0 +1,37 @@
+# Build context is ONLY ../pi-web; never the repository or developer's home.
+FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS baseline
+WORKDIR /app
+# Stable OS dependencies precede package manifests and source to preserve cache.
+# Git is required by the preserved worktree and package-management features.
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && chown node:node /app
+USER node
+COPY --chown=node:node package.json package-lock.json ./
+# Review required install hooks explicitly; no arbitrary lifecycle scripts.
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY --chown=node:node . .
+ENV HOME=/home/node \
+    PI_CODING_AGENT_DIR=/home/node/.pi/agent \
+    PI_WEB_SKIP_VERSION_CHECK=1 \
+    NEXT_TELEMETRY_DISABLED=1
+CMD ["npm", "test"]
+
+# Explicit --target runtime and --build-context agent-integration=../integration.
+# Next's pinned config uses CIRCLE_NODE_TOTAL - 1 workers: one worker here.
+# Google Font assets are fetched at build time; the runtime remains network-none.
+FROM baseline AS runtime
+ENV NEXT_PUBLIC_DATAHUB_EMBED=true \
+    PI_WEB_MCP_ADAPTER=/app/lib/datahub-extension-entry.ts
+RUN CIRCLE_NODE_TOTAL=2 NODE_OPTIONS=--max-old-space-size=1536 \
+    node node_modules/next/dist/bin/next build --webpack
+COPY --from=agent-integration runtime-entry.mjs runtime-relay.mjs /opt/datahub-agent/
+CMD ["node", "/opt/datahub-agent/runtime-entry.mjs"]
+
+# Export ONLY immutable browser assets; never runtime HOME, config or server code.
+FROM scratch AS browser-assets
+COPY --from=runtime /app/.next/static /_next/static
+COPY --from=runtime /app/.next/server/app/index.html /index.html
+
+# Preserve the original no-build/default test image behavior.
+FROM baseline AS tests

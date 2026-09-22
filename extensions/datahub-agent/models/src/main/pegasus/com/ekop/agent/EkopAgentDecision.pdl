@@ -1,0 +1,32 @@
+namespace com.ekop.agent
+
+/** One question from the running agent. No response means pending. */
+record EkopAgentDecision {
+  /** Unique within the associated Pi run. */
+  id: string
+
+  question: string
+
+  /** Suggested responses; free-text input remains available. */
+  choices: array[string] = []
+
+  requestedAt: long
+
+  /** Only the trusted Host may attach a compiled publication proposal.
+   * Ordinary questions and responses retain their previous meaning.
+   */
+  publicationReview: optional EkopAgentPublicationReview
+
+  response: optional EkopAgentDecisionResponse
+
+  /** Host-only admission, persisted with the same Run CAS as this Decision.
+   * Absence on legacy records does not create consent without a typed APPROVE.
+   */
+  publicationAttempt: optional EkopAgentPublicationAttempt
+
+  /** Mutually exclusive with publicationReview; only the Host creates this intent. */
+  executionReview: optional EkopAgentExecutionReview
+
+  /** One attempt per Run; never replace it to retry an uncertain SQL outcome. */
+  executionAttempt: optional EkopAgentExecutionAttempt
+}

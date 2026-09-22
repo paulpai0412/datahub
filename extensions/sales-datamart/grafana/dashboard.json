@@ -1,0 +1,157 @@
+{
+  "dashboard": {
+    "uid": "dataflow-sales-v1",
+    "title": "DataFlow SalesDatamart",
+    "description": "Approved local-currency AdventureWorks SalesDatamart metrics; v1 fixed scope.",
+    "tags": ["dataflow-discovery", "sales-datamart"],
+    "timezone": "utc",
+    "editable": false,
+    "graphTooltip": 1,
+    "time": {
+      "from": "2011-05-31T00:00:00.000Z",
+      "to": "2014-07-01T00:00:00.000Z"
+    },
+    "timepicker": {
+      "refresh_intervals": [],
+      "time_options": ["1d", "7d", "30d", "90d", "1y"]
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "territory",
+          "label": "Territory",
+          "type": "query",
+          "datasource": {"type": "mssql", "uid": "dataflow-salesdatamart"},
+          "query": "SELECT DISTINCT COALESCE(TerritoryName, 'Unknown') AS __text, COALESCE(TerritoryName, 'Unknown') AS __value FROM reporting.v_sales_order_line ORDER BY 1",
+          "includeAll": true,
+          "multi": true,
+          "allValue": "",
+          "refresh": 1,
+          "current": {"text": "All", "value": "$__all"}
+        },
+        {
+          "name": "category",
+          "label": "Product category",
+          "type": "query",
+          "datasource": {"type": "mssql", "uid": "dataflow-salesdatamart"},
+          "query": "SELECT DISTINCT COALESCE(ProductCategoryName, 'Unknown') AS __text, COALESCE(ProductCategoryName, 'Unknown') AS __value FROM reporting.v_sales_order_line ORDER BY 1",
+          "includeAll": true,
+          "multi": true,
+          "allValue": "",
+          "refresh": 1,
+          "current": {"text": "All", "value": "$__all"}
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "datasource": {"type": "mssql", "uid": "dataflow-salesdatamart"},
+        "type": "stat",
+        "title": "Sales amount (local currency)",
+        "options": {"colorMode": "none"},
+        "description": "SUM(LineNetAmount); local scope only, excludes tax and freight.",
+        "gridPos": {"h": 5, "w": 8, "x": 0, "y": 0},
+        "fieldConfig": {"defaults": {"unit": "none", "decimals": 2}, "overrides": []},
+        "targets": [{
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT SUM(LineNetAmount) AS value FROM reporting.v_sales_order_line WHERE $__timeFilter(OrderDate) AND COALESCE(TerritoryName, 'Unknown') IN (${territory:sqlstring}) AND COALESCE(ProductCategoryName, 'Unknown') IN (${category:sqlstring})"
+        }]
+      },
+      {
+        "id": 2,
+        "datasource": {"type": "mssql", "uid": "dataflow-salesdatamart"},
+        "type": "stat",
+        "title": "Distinct orders",
+        "options": {"colorMode": "none"},
+        "description": "COUNT(DISTINCT SalesOrderID); not additive across product/category subtotals.",
+        "gridPos": {"h": 5, "w": 8, "x": 8, "y": 0},
+        "fieldConfig": {"defaults": {"unit": "none", "decimals": 0}, "overrides": []},
+        "targets": [{
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT SalesOrderID) AS value FROM reporting.v_sales_order_line WHERE $__timeFilter(OrderDate) AND COALESCE(TerritoryName, 'Unknown') IN (${territory:sqlstring}) AND COALESCE(ProductCategoryName, 'Unknown') IN (${category:sqlstring})"
+        }]
+      },
+      {
+        "id": 3,
+        "datasource": {"type": "mssql", "uid": "dataflow-salesdatamart"},
+        "type": "stat",
+        "title": "Average order value",
+        "options": {"colorMode": "none"},
+        "description": "SUM(LineNetAmount) / COUNT(DISTINCT SalesOrderID); NULL for zero orders.",
+        "gridPos": {"h": 5, "w": 8, "x": 16, "y": 0},
+        "fieldConfig": {"defaults": {"unit": "none", "decimals": 2}, "overrides": []},
+        "targets": [{
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT CASE WHEN COUNT(DISTINCT SalesOrderID) = 0 THEN NULL ELSE CAST(ROUND((SUM(LineNetAmount) * CAST(1000000 AS decimal(7,0))) / NULLIF(COUNT(DISTINCT SalesOrderID), 0), 0) AS decimal(38,0)) / CAST(1000000 AS decimal(7,0)) END AS value FROM reporting.v_sales_order_line WHERE $__timeFilter(OrderDate) AND COALESCE(TerritoryName, 'Unknown') IN (${territory:sqlstring}) AND COALESCE(ProductCategoryName, 'Unknown') IN (${category:sqlstring})"
+        }]
+      },
+      {
+        "id": 4,
+        "datasource": {"type": "mssql", "uid": "dataflow-salesdatamart"},
+        "type": "timeseries",
+        "title": "Monthly sales trend",
+        "description": "Calendar-month SUM(LineNetAmount) over the shared filters; each point is anchored at the first selected order date in that month, so partial-month totals stay inside the displayed range.",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+        "fieldConfig": {"defaults": {"unit": "none", "decimals": 2}, "overrides": []},
+        "targets": [{
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT MIN(CAST(OrderDate AS datetime)) AS time, SUM(LineNetAmount) AS sales_amount FROM reporting.v_sales_order_line WHERE $__timeFilter(OrderDate) AND COALESCE(TerritoryName, 'Unknown') IN (${territory:sqlstring}) AND COALESCE(ProductCategoryName, 'Unknown') IN (${category:sqlstring}) GROUP BY DATEFROMPARTS(YEAR(OrderDate), MONTH(OrderDate), 1) ORDER BY time"
+        }]
+      },
+      {
+        "id": 5,
+        "datasource": {"type": "mssql", "uid": "dataflow-salesdatamart"},
+        "type": "barchart",
+        "title": "Sales by product category",
+        "description": "SUM(LineNetAmount) by ProductCategoryName.",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+        "fieldConfig": {"defaults": {"unit": "none", "decimals": 2}, "overrides": []},
+        "targets": [{
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(ProductCategoryName, 'Unknown') AS category, SUM(LineNetAmount) AS sales_amount FROM reporting.v_sales_order_line WHERE $__timeFilter(OrderDate) AND COALESCE(TerritoryName, 'Unknown') IN (${territory:sqlstring}) AND COALESCE(ProductCategoryName, 'Unknown') IN (${category:sqlstring}) GROUP BY COALESCE(ProductCategoryName, 'Unknown') ORDER BY sales_amount DESC"
+        }]
+      },
+      {
+        "id": 6,
+        "datasource": {"type": "mssql", "uid": "dataflow-salesdatamart"},
+        "type": "barchart",
+        "title": "Sales by territory",
+        "options": {"orientation": "horizontal"},
+        "description": "SUM(LineNetAmount) by TerritoryName.",
+        "gridPos": {"h": 10, "w": 24, "x": 0, "y": 13},
+        "fieldConfig": {"defaults": {"unit": "none", "decimals": 2}, "overrides": []},
+        "targets": [{
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(TerritoryName, 'Unknown') AS territory, SUM(LineNetAmount) AS sales_amount FROM reporting.v_sales_order_line WHERE $__timeFilter(OrderDate) AND COALESCE(TerritoryName, 'Unknown') IN (${territory:sqlstring}) AND COALESCE(ProductCategoryName, 'Unknown') IN (${category:sqlstring}) GROUP BY COALESCE(TerritoryName, 'Unknown') ORDER BY sales_amount DESC"
+        }]
+      },
+      {
+        "id": 7,
+        "datasource": {"type": "mssql", "uid": "dataflow-salesdatamart"},
+        "type": "table",
+        "title": "Sales quality summary",
+        "description": "Reconciliation fields exposed without source row data.",
+        "gridPos": {"h": 6, "w": 24, "x": 0, "y": 23},
+        "fieldConfig": {"defaults": {}, "overrides": []},
+        "targets": [{
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT_BIG(*) AS line_count, COUNT(DISTINCT SalesOrderID) AS order_count, SUM(OrderQty) AS quantity, SUM(LineNetAmount) AS line_net_amount, SUM(SourceLineTotal) AS source_line_total FROM reporting.v_sales_order_line WHERE $__timeFilter(OrderDate) AND COALESCE(TerritoryName, 'Unknown') IN (${territory:sqlstring}) AND COALESCE(ProductCategoryName, 'Unknown') IN (${category:sqlstring})"
+        }]
+      }
+    ],
+    "schemaVersion": 39,
+    "version": 1,
+    "annotations": {"list": []},
+    "links": []
+  },
+  "folderUid": "dataflow-discovery",
+  "overwrite": false
+}

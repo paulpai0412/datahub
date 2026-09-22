@@ -1,0 +1,4 @@
+namespace com.ekop.agent
+
+/** Shared purpose: resolve by schema path, independent of record parse order. */
+enum EkopAgentExecutionPurpose { FIXED_ETL }

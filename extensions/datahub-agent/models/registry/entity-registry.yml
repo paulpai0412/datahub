@@ -1,0 +1,8 @@
+id: ekop-agent-tasks
+entities:
+  - name: dataJob
+    aspects:
+      - ekopAgentTask
+  - name: dataProcessInstance
+    aspects:
+      - ekopAgentRun

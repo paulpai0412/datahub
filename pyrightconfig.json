@@ -1,0 +1,10 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": ["extensions", "tests"],
+  "exclude": ["**/node_modules", "**/__pycache__"],
+  "extraPaths": [
+    "extensions/dataflow-discovery/src",
+    "extensions/sales-datamart/src"
+  ]
+}
