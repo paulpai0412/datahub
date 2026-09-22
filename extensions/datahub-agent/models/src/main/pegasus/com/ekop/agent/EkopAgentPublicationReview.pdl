@@ -22,6 +22,10 @@ record EkopAgentPublicationReview {
   datasets: array[Urn]
   expiresAt: long
   changes: array[EkopAgentPublicationChange]
+  /** Optional typed Steward intent, projected evidence and version guards.
+   * Canonical JSON, digest-bound; never credentials, recipes or arbitrary APIs.
+   */
+  semanticContextJson: optional string
   /** SHA-256 of the canonical proposal, excluding this field and any response. */
   planDigest: string
 }

@@ -1,5 +1,16 @@
 # T06 Task／Decision 的最小官方模型擴充
 
+## Semantic Steward 本地候選 0.1.8
+
+本工作樹 `toolchain.lock.json`／`build.gradle` 的目前來源版本為 **0.1.8**。增加三個 optional string：publication review 的 `semanticContextJson`、change 的 `beforeValueJson`、attempt 的 `outcomeJson`。它們沿用既有 Task／Run／Decision，不新增 Entity／store；舊記錄不會因缺欄位被當成已批准或已成功。
+
+0.1.8 已使用固定官方 Core jars、既有 checksum 驗證依賴，在 credential-free／network-none 容器以 Gradle offline 建置並通過 Pegasus roundtrip／annotation 檢查；產物留在工作樹 `.local/evidence/semantic-steward/s3/model-build/`。**未部署**。不得把新欄位送到未載入相容模型的 GMS，不覆寫舊 release 或以刪除歷史回滾。
+
+既有實測 Task／Run 可由其他 Catalog Reader 讀取，並非 actor 私有區。Steward operator policy 必須明列 `semanticAuditAudience: EXISTING_TASK_RUN_ACL` 才能準備提案；這是對既有可見範圍的明確確認，不會自動變更 Policy 或縮限 Native API。若需更窄的讀者範圍，先以官方 Policy 配置並驗證；不得僅依 Host owner check 宣稱底層記錄已隔離。記錄禁止憑證；完整 before／after 也只可涵蓋已批准落入該原生 ACL 的 metadata。
+
+目前 S3 接線與證據見 [Semantic Steward S3](../../../docs/verification/datahub-semantic-steward-s3.md)。**以下 0.1.0–0.1.3 部分是當時記錄，不代表目前線上版本；本輪沒有讀取或切換線上 registry。**
+
+
 使用 DataHub v1.7.0.1 的官方 `metadata-models-custom` 產物格式及 model registry loader；不修改 Core，不新增 Entity 或 datastore。
 
 | 原生 Entity | 新增 Aspect | 用途 |

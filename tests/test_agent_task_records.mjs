@@ -341,6 +341,7 @@ test("fixed ETL real CLI pipe crosses the Host CAS gate and records terminal res
           "native-fixed-etl.mjs",
           "fixed-etl-review.mjs",
           "publication-review.mjs",
+          "semantic-preservation.mjs",
         ])
           copyFileSync(
             new URL(

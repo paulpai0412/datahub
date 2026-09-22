@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util";
 import { randomUUID, createHash } from "node:crypto";
 import { datahubSessionCookie } from "./datahub-identity.mjs";
+import { validateStewardChange } from "./semantic-preservation.mjs";
 import {
   validatePublicationReview,
   canonicalPublicationJson,
@@ -106,6 +107,7 @@ export function taskRecords({
   fetchImpl = fetch,
   now = Date.now,
   recompilePublication,
+  verifyPublicationReadback,
   publicationAdoption,
   authorizeFixedEtl,
   recompileFixedEtl,
@@ -435,6 +437,8 @@ export function taskRecords({
       dataPlatform: "DATA_PLATFORM",
       tag: "TAG",
       glossaryTerm: "GLOSSARY_TERM",
+      domain: "DOMAIN", glossaryNode: "GLOSSARY_NODE",
+      structuredProperty: "STRUCTURED_PROPERTY", schemaField: "SCHEMA_FIELD",
     };
     const targets = new Set(review.changes.map((change) => change.urn));
     for (const id of new Set([...review.datasets, ...targets])) {
@@ -494,6 +498,11 @@ export function taskRecords({
     const owners = new Map();
     for (const change of review.changes) {
       const current = rows.get(change.urn)?.[change.aspect];
+      if (review.semanticContextJson !== undefined) {
+        requireValue(typeof recompilePublication === "function" && typeof verifyPublicationReadback === "function", "semantic_compiler_required");
+        requireValue(validateStewardChange(review, change, current?.value, actor.urn), "semantic_human_value_conflict");
+        continue; // Addition/fill-only, never ownership/adoption of the whole Aspect.
+      }
       if (!current) continue; // Absence is checked again by native per-Aspect CAS.
       requireValue(
         canonicalPublicationJson(current.value) !== change.valueJson,
@@ -545,6 +554,9 @@ export function taskRecords({
         (d) => d.id === priorDecision,
       );
       const previous = historicalConsent(decision);
+      // A Steward locator proves only the selected additions, never ownership
+      // of all preserved human members for a later legacy publisher.
+      requireValue(previous.semanticContextJson === undefined, "publication_target_not_owned");
       requireValue(
         previous.source === review.source &&
           previous.sourceId === review.sourceId &&
@@ -745,6 +757,19 @@ export function taskRecords({
         error.reconciliation = reconciliation;
       throw error;
     }
+  }
+  // Immutable initial observation, separate from a later current-value read.
+  // A crash before this write leaves the permanent attempt marker UNKNOWN.
+  async function recordPublicationOutcome(id, decisionId, attemptId, outcome) {
+    const run = await read("run", id);
+    requireValue(run.value.actor === actor.urn, "task_owner_mismatch", 403);
+    const decision = run.value.decisions?.find((entry) => entry.id === decisionId);
+    requireValue(decision?.publicationAttempt?.attemptId === attemptId, "publication_attempt_mismatch");
+    requireValue(decision.publicationAttempt.outcomeJson === undefined, "publication_outcome_already_recorded");
+    const outcomeJson = canonicalPublicationJson({ ...outcome, recordedAt: now() });
+    requireValue(Buffer.byteLength(outcomeJson) <= 65536, "publication_outcome_too_large");
+    return write("run", id, { ...run.value, decisions: run.value.decisions.map((entry) => entry === decision
+      ? { ...entry, publicationAttempt: { ...entry.publicationAttempt, outcomeJson } } : entry) }, run.version);
   }
   // Only the owning fixed-process supervisor calls this seam. No result-writing
   // operation is exposed to the model/browser. Preserve closed/revoked history;
@@ -1206,6 +1231,25 @@ export function taskRecords({
         proposal,
       );
     },
+    /** Host-only narrowing: one Run CAS rejects the prior pending plan and
+     * appends its selected replacement. No consent is carried forward. */
+    async selectPublicationReview(id, expectedVersion, nativeSessionId, decisionId, expectedDigest, proposal, nextId) {
+      const { run, task } = await activeRun(id, expectedVersion, nativeSessionId);
+      requireValue(task.value.allowDecisions === true, "task_decisions_disabled");
+      const previous = run.value.decisions.find((entry) => entry.id === decisionId);
+      requireValue(previous && !previous.response && !previous.publicationAttempt, "task_decision_already_answered");
+      const old = publication(previous.publicationReview, task), review = publication(proposal, task);
+      requireValue(old.semanticContextJson && review.semanticContextJson && old.planDigest === expectedDigest &&
+        review.candidateIds.every((key) => old.candidateIds.includes(key)), "semantic_selection_mismatch");
+      requireValue(text(nextId, 128) && !run.value.decisions.some((entry) => entry.id === nextId), "task_decision_exists");
+      await publicationVersions(review);
+      const at = now();
+      const replacement = { id: nextId, question: previous.question, choices: [], requestedAt: at, publicationReview: review };
+      return write("run", id, { ...run.value, decisions: [...run.value.decisions.map((entry) => entry === previous
+        ? { ...entry, response: { action: "RESPOND", actor: actor.urn, respondedAt: at, text: `Selection superseded by ${nextId}; no consent carried forward.`,
+          publicationVerdict: { purpose: old.purpose, planDigest: old.planDigest, verdict: "REJECT" } } } : entry), replacement] },
+        expectedVersion, () => publication(review, task));
+    },
     async respondPublicationReview(
       id,
       expectedVersion,
@@ -1241,7 +1285,14 @@ export function taskRecords({
         input.planDigest === review.planDigest,
         "publication_review_digest_mismatch",
       );
-      if (input.verdict === "APPROVE") await publicationVersions(review);
+      if (input.verdict === "APPROVE") {
+        await publicationVersions(review);
+        if (review.semanticContextJson !== undefined) {
+          await recompile(review);
+          await publicationGrants(review);
+          await ownedPublicationTargets(review, await publicationVersions(review));
+        }
+      }
       const response = {
         action: "RESPOND",
         actor: actor.urn,
@@ -1413,14 +1464,31 @@ export function taskRecords({
           ),
           "publication_readback_mismatch",
         );
-        return { status: "VERIFIED_CURRENT_VALUES", ...admitted, observations };
+        let contextVerification;
+        if (review.semanticContextJson !== undefined) {
+          contextVerification = await verifyPublicationReadback(review);
+          await recordPublicationOutcome(id, decisionId, admitted.attemptId, {
+            status: "VERIFIED_CURRENT_VALUES", observations, contextVerification,
+          });
+        }
+        return { status: "VERIFIED_CURRENT_VALUES", ...admitted, observations, ...(contextVerification ? { contextVerification } : {}) };
       } catch (error) {
         // Even a batch 412 or failed readback may follow partial native writes.
         const reason =
           error instanceof TaskRecordError &&
-          /^(?:publication|task|datahub)_[a-z_]{1,100}$/.test(error.message)
+          /^(?:publication|task|datahub|semantic)_[a-z_]{1,100}$/.test(error.message)
             ? error.message
             : "publication_validation_failed";
+        let outcomeRecordingConfirmed = false;
+        if (review.semanticContextJson !== undefined) {
+          try {
+            await recordPublicationOutcome(id, decisionId, admitted.attemptId, {
+              status: targetRequestInvoked ? "UNKNOWN_OR_CONTEXT_CHANGED" : "NOT_DISPATCHED",
+              reason, ...(observations ? { observations } : {}),
+            });
+            outcomeRecordingConfirmed = true;
+          } catch { /* Keep original error and consumed admission; read-only reconciliation only. */ }
+        }
         throw new TaskRecordError(
           targetRequestInvoked
             ? "publication_write_unconfirmed"
@@ -1433,6 +1501,7 @@ export function taskRecords({
             planDigest: review.planDigest,
             targetRequestInvoked,
             reason,
+            ...(review.semanticContextJson !== undefined ? { outcomeRecordingConfirmed } : {}),
             ...(observations ? { observations } : {}),
           },
         );

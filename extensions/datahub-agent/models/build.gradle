@@ -14,7 +14,7 @@ apply plugin: 'java-library'
 apply plugin: 'pegasus'
 
 group = 'com.ekop'
-version = '0.1.7'
+version = '0.1.8'
 // Keep released artifacts and generated classes intact; each model version gets
 // its own build tree, so an old jar cannot leak into the new registry ZIP.
 layout.buildDirectory = layout.projectDirectory.dir("build/${version}")
@@ -55,6 +55,7 @@ tasks.register('modelCheck', JavaExec) {
     dependsOn testClasses
     classpath = sourceSets.test.runtimeClasspath
     mainClass = 'com.ekop.agent.ModelRoundTripCheck'
+    if (project.hasProperty('semanticFixture')) args project.property('semanticFixture')
     jvmArgs '-XX:ActiveProcessorCount=1', '-Xmx256m'
 }
 

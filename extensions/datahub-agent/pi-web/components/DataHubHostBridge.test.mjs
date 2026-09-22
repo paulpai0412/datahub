@@ -232,6 +232,19 @@ test("Discovery uses its read-only Host channel and does not consume a Task Deci
   }
 });
 
+test("Semantic uses its own read-only channel and fails outside the trusted parent", async () => {
+  const f = bridge("DataHub semantic request");
+  try {
+    await f.reply({ publicationAuthorized: false, changes: [] });
+    assert.equal(f.sent[0].type, "datahub-semantic");
+    assert.equal(f.responses.length, 1);
+  } finally { f.close(); }
+  const standalone = bridge("DataHub semantic request", false);
+  try {
+    assert.equal(JSON.parse(standalone.responses[0].value).error, "datahub_host_required");
+  } finally { standalone.close(); }
+});
+
 test("ingestion keeps its existing unconfirmed-result and missing-host behavior", async () => {
   for (const embedded of [true, false]) {
     const f = bridge("DataHub ingestion request", embedded);

@@ -6,6 +6,7 @@ import { Transform } from "node:stream";
 import { BrowserGrants, GrantError } from "./browser-grants.mjs";
 import { IngestionError } from "./native-ingestion.mjs";
 import { DiscoveryError } from "./native-discovery.mjs";
+import { SemanticError } from "./native-semantic.mjs";
 import { TaskRecordError } from "./task-records.mjs";
 import manifest from "../pi-web/app/manifest.ts";
 import {
@@ -288,6 +289,7 @@ export async function createAgentGateway({
   ingestionRequest,
   taskRequest,
   discoveryRequest,
+  semanticRequest,
   mfeDirectory,
   publicDirectory = fileURLToPath(
     new URL("../pi-web/public/", import.meta.url),
@@ -310,6 +312,7 @@ export async function createAgentGateway({
     ["/agent/ingestion", { handler: ingestionRequest, name: "ingestion" }],
     ["/agent/tasks", { handler: taskRequest, name: "tasks" }],
     ["/agent/discovery", { handler: discoveryRequest, name: "discovery" }],
+    ["/agent/semantic", { handler: semanticRequest, name: "semantic" }],
   ]);
   const staticFiles = new Map();
   for (const name of await readdir(mfeDirectory)) {
@@ -431,9 +434,11 @@ export async function createAgentGateway({
             : operations.has(request.url)
               ? ["grantId", "revokeToken", "request"]
               : ["grantId", "revokeToken"],
-          ["/agent/tasks", "/agent/discovery"].includes(request.url)
-            ? 16384
-            : 4096,
+          request.url === "/agent/semantic"
+            ? 49152 // JSON-escaped 24KB intent plus parent-only proof envelope.
+            : ["/agent/tasks", "/agent/discovery"].includes(request.url)
+              ? 16384
+              : 4096,
         );
         if (request.url === "/agent/bootstrap") {
           const actor = await verifyIdentity(request.headers.cookie);
@@ -464,7 +469,9 @@ export async function createAgentGateway({
             assertActive,
             ...(request.url === "/agent/tasks"
               ? { runtime: await runtimeForActor(actor) }
-              : {}),
+              : request.url === "/agent/semantic"
+                ? { getRuntime: () => runtimeForActor(actor) }
+                : {}),
           });
           assertActive();
           json(response, 200, result);
@@ -546,6 +553,7 @@ export async function createAgentGateway({
         error instanceof HttpError ||
         error instanceof IngestionError ||
         error instanceof DiscoveryError ||
+        error instanceof SemanticError ||
         error instanceof TaskRecordError;
       const status = knownError
         ? error.status

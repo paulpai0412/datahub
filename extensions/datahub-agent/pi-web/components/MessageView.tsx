@@ -6,6 +6,8 @@ import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
 import { DataHubEtlPreview, isEtlPreview } from "./DataHubEtlPreview";
+import { DataHubSemanticPreview, isSemanticPreview } from "./DataHubSemanticPreview";
+import { DataHubSemanticReview, isSemanticReview } from "./DataHubSemanticReview";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
@@ -1583,6 +1585,14 @@ function ToolCallBlock({
     isEtlPreview(result?.details)
       ? result.details
       : null;
+  const semanticPreview =
+    block.toolName === "datahub_semantic" && !isError && isSemanticPreview(result?.details)
+      ? result.details
+      : null;
+  const semanticReview =
+    block.toolName === "datahub_semantic" && !isError && isSemanticReview(result?.details)
+      ? result.details
+      : null;
 
   return (
     <div
@@ -1710,6 +1720,8 @@ function ToolCallBlock({
       </div>
 
       {etlPreview && <DataHubEtlPreview preview={etlPreview} />}
+      {semanticPreview && <DataHubSemanticPreview preview={semanticPreview} />}
+      {semanticReview && <DataHubSemanticReview review={semanticReview} />}
 
       {/* ── Expanded: input args ── */}
       {expanded && (isStreamingInput || !isEditTool) && (

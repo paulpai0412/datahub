@@ -14,6 +14,7 @@ export function isDataHubHostRequest(
       "DataHub workspace import",
       "DataHub import readback",
       "DataHub discovery request",
+      "DataHub semantic request",
     ].includes(request.title)
   );
 }
@@ -104,7 +105,9 @@ export function DataHubHostBridge({
                   ? "datahub-task-decision"
                   : request.title === "DataHub discovery request"
                     ? "datahub-discovery"
-                    : "datahub-ingestion",
+                    : request.title === "DataHub semantic request"
+                      ? "datahub-semantic"
+                      : "datahub-ingestion",
           body: request.placeholder,
           uiRequestId: request.id,
         },
