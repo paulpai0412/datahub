@@ -11,4 +11,9 @@ record EkopAgentPublicationAttempt {
 
   /** Host time when admission was prepared; not target execution time. */
   claimedAt: long
+
+  /** Host-only immutable initial observation. Absence or UNKNOWN never restores
+   * consent. Later reconciliation is a current read, not a rewritten receipt.
+   */
+  outcomeJson: optional string
 }

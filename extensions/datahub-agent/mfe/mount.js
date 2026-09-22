@@ -1,5 +1,6 @@
 import { installIngestionBridge } from "./ingestion.js";
 import { installDiscoveryBridge } from "./discovery.js";
+import { installSemanticBridge } from "./semantic.js";
 import { installRegistryView } from "./registry.js";
 import { installTaskDecisionBridge } from "./task-decision.js";
 
@@ -34,6 +35,7 @@ export function mount(container) {
   let heartbeat;
   let stopIngestion;
   let stopDiscovery;
+  let stopSemantic;
   let stopRegistry;
   let stopDecisions;
   let mounted = false;
@@ -54,7 +56,7 @@ export function mount(container) {
             AbortSignal.timeout(
               path === "/agent/tasks"
                 ? 90000
-                : ["/agent/ingestion", "/agent/discovery"].includes(path)
+                : ["/agent/ingestion", "/agent/discovery", "/agent/semantic"].includes(path)
                   ? 45000
                   : 10000,
             ),
@@ -64,6 +66,7 @@ export function mount(container) {
   function failed() {
     stopIngestion?.();
     stopDiscovery?.();
+    stopSemantic?.();
     stopDecisions?.();
     stopRegistry?.();
     clearInterval(heartbeat);
@@ -166,6 +169,21 @@ export function mount(container) {
           return response.json(); // Gateway errors are already bounded safe codes.
         },
       });
+      stopSemantic = installSemanticBridge({
+        container,
+        actorKey: key,
+        frame,
+        origin: launch.origin,
+        send: async (request, signal) => {
+          const response = await post(
+            "/agent/semantic",
+            { grantId, revokeToken, request: JSON.stringify(request) },
+            false,
+            signal,
+          );
+          return response.json(); // Host returns bounded error codes, never upstream bodies.
+        },
+      });
       heartbeat = setInterval(async () => {
         if (renewing) return;
         renewing = true;
@@ -186,6 +204,7 @@ export function mount(container) {
   return () => {
     stopIngestion?.();
     stopDiscovery?.();
+    stopSemantic?.();
     stopDecisions?.();
     stopRegistry?.();
     clearInterval(heartbeat);

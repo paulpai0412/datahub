@@ -8,6 +8,8 @@ import { createRuntimeManager } from "./runtime-manager.mjs";
 import { validateEgressOrigins } from "./egress-proxy.mjs";
 import { ingestionPolicies } from "./ingestion-policy.mjs";
 import { nativeIngestion } from "./native-ingestion.mjs";
+import { SemanticError } from "./native-semantic.mjs";
+import { semanticHost } from "./native-semantic-tasks.mjs";
 import { nativeTasks } from "./native-tasks.mjs";
 import { fixedEtlPolicies } from "./native-fixed-etl.mjs";
 import {
@@ -67,7 +69,12 @@ export async function startAgentServer(config) {
     sourcePolicies,
   );
   const discoveryScopes = discoveryPolicies(config.discoverySourcesByActor);
-  const discoveryActive = new Set();
+  const analysisActive = new Set();
+  async function analyzeBounded(actor, exhausted, operation) {
+    if (analysisActive.has(actor.key) || analysisActive.size >= 2) throw exhausted;
+    analysisActive.add(actor.key);
+    try { return await operation(); } finally { analysisActive.delete(actor.key); }
+  }
   let gatewayOrigin;
   try {
     gatewayOrigin = new URL(config.gatewayOrigin);
@@ -140,23 +147,23 @@ export async function startAgentServer(config) {
           sources: sourcePolicies.get(context.actor.key) ?? [],
           frontendOrigin: config.datahubOrigin,
         }),
-      discoveryRequest: async (text, context) => {
-        // Bound parser subprocesses independently of runtime and SQL concurrency.
-        if (discoveryActive.has(context.actor.key) || discoveryActive.size >= 2)
-          throw new DiscoveryError("discovery_capacity_exhausted", 429);
-        discoveryActive.add(context.actor.key);
-        try {
-          return await nativeDiscovery(text, {
-            actor: context.actor,
-            assertActive: context.assertActive,
-            sources: discoveryScopes.get(context.actor.key) ?? [],
-            frontendOrigin: config.datahubOrigin,
-            cookieHeader: context.cookieHeader,
-          });
-        } finally {
-          discoveryActive.delete(context.actor.key);
-        }
-      },
+      semanticRequest: (text, context) =>
+        analyzeBounded(context.actor, new SemanticError("semantic_capacity_exhausted", 429), () => semanticHost(text, {
+          ...context,
+          runtime: { state: async (sessionId) => taskRuntime(await context.getRuntime(), context.assertActive).state(sessionId) },
+          sources: sourcePolicies.get(context.actor.key) ?? [],
+          frontendOrigin: config.datahubOrigin,
+        })),
+      discoveryRequest: (text, context) =>
+        // One shared parser pool covers Discovery, Semantic and workspace import.
+        // Runtime and SQL concurrency remain independently controlled.
+        analyzeBounded(context.actor, new DiscoveryError("discovery_capacity_exhausted", 429), () => nativeDiscovery(text, {
+          actor: context.actor,
+          assertActive: context.assertActive,
+          sources: discoveryScopes.get(context.actor.key) ?? [],
+          frontendOrigin: config.datahubOrigin,
+          cookieHeader: context.cookieHeader,
+        })),
       taskRequest: async (text, context) => {
         const compiling = [
           "prepare_workspace_import",
@@ -164,11 +171,11 @@ export async function startAgentServer(config) {
         ].includes(JSON.parse(text)?.action);
         if (compiling) {
           if (
-            discoveryActive.has(context.actor.key) ||
-            discoveryActive.size >= 2
+            analysisActive.has(context.actor.key) ||
+            analysisActive.size >= 2
           )
             throw new DiscoveryError("discovery_capacity_exhausted", 429);
-          discoveryActive.add(context.actor.key);
+          analysisActive.add(context.actor.key);
         }
         try {
           const host = {
@@ -187,7 +194,7 @@ export async function startAgentServer(config) {
               workspaceImportCompiler(input, source, host),
           });
         } finally {
-          if (compiling) discoveryActive.delete(context.actor.key);
+          if (compiling) analysisActive.delete(context.actor.key);
         }
       },
       browserAssetsDirectory: config.browserAssetsDirectory,

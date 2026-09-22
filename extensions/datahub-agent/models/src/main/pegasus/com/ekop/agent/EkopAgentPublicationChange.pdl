@@ -10,4 +10,6 @@ record EkopAgentPublicationChange {
   aspect: string
   expectedVersion: string
   valueJson: string
+  /** Steward-only exact prior value (JSON null means absent), bound by planDigest. */
+  beforeValueJson: optional string
 }

@@ -1,6 +1,5 @@
-import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { fileURLToPath } from "node:url";
+import { invokePythonBridge } from "./python-bridge.mjs";
 import { isAbsolute } from "node:path";
 import { datahubSessionCookie } from "./datahub-identity.mjs";
 import {
@@ -307,15 +306,6 @@ function parseRequest(text) {
   return request;
 }
 
-const python = fileURLToPath(
-  new URL("../../../.venv/bin/python", import.meta.url),
-);
-const bridge = fileURLToPath(
-  new URL(
-    "../../dataflow-discovery/src/dataflow_discovery/bridge.py",
-    import.meta.url,
-  ),
-);
 const bridgeErrors = new Set([
   "invalid_discovery_page",
   "discovery_snapshot_rejected",
@@ -344,41 +334,15 @@ const bridgeErrors = new Set([
 ]);
 
 /** Shared fixed subprocess transport; never executes captured source. */
-function invokeBridge(payload, maxBuffer) {
-  return new Promise((resolve, reject) => {
-    const child = execFile(
-      python,
-      ["-I", "-B", bridge],
-      {
-        timeout: 30000,
-        killSignal: "SIGKILL",
-        maxBuffer,
-        env: {
-          PATH: "/usr/bin:/bin",
-          LANG: "C.UTF-8",
-          HOME: "/dev/null",
-          DATAHUB_TELEMETRY_ENABLED: "false",
-        },
-      },
-      (error, stdout) => {
-        let result;
-        try {
-          result = JSON.parse(stdout);
-        } catch {
-          /* Fixed error below; never return stderr. */
-        }
-        if (object(result) && bridgeErrors.has(result.error)) {
-          reject(new DiscoveryError(result.error, 409));
-        } else if (error || !object(result)) {
-          reject(new DiscoveryError("discovery_analysis_unavailable", 503));
-        } else resolve(result);
-      },
-    );
-    child.stdin.on("error", () => {
-      /* execFile completion reports process failure. */
-    });
-    child.stdin.end(JSON.stringify(payload));
-  });
+async function invokeBridge(payload, maxBuffer) {
+  const { failed, stdout } = await invokePythonBridge("discovery", payload, maxBuffer);
+  let result;
+  try { result = JSON.parse(stdout); } catch { /* Never return stderr. */ }
+  if (object(result) && bridgeErrors.has(result.error)) {
+    throw new DiscoveryError(result.error, 409);
+  }
+  if (failed || !object(result)) throw new DiscoveryError("discovery_analysis_unavailable", 503);
+  return result;
 }
 
 /** Fixed trusted parser executable; never a shell, analyzed program or runtime worker. */

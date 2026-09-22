@@ -7,3 +7,6 @@
 !.env.example
 __pycache__/
 *.pyc
+# Worktree-local dependency links; never commit installed packages or machine paths.
+/.venv
+/extensions/datahub-agent/mfe/node_modules

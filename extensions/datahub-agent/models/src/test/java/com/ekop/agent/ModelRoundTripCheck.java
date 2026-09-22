@@ -161,6 +161,31 @@ public final class ModelRoundTripCheck {
     require(executionReadback.getDecisions().get(0).getExecutionAttempt().getState()
         == EkopAgentExecutionState.UNKNOWN, "Uncertain ETL state lost");
     require(!executionReadback.getDecisions().get(0).hasPublicationReview(), "ETL became metadata consent");
-    System.out.println("PASS: legacy Task/Run/Decision, publication and distinct ETL review/verdict/attempt roundtrips; missing-field/purpose/action/outcome negatives; Host digest/ACL/CAS semantics are separate tests");
+    require(!proposal.hasSemanticContextJson(), "Legacy review acquired Steward evidence");
+    require(!proposal.getChanges().get(0).hasBeforeValueJson(), "Legacy change acquired invented before-values");
+    require(!attempt.hasOutcomeJson(), "Legacy attempt became a successful publication");
+    var steward = new EkopAgentPublicationReview(CODEC.stringToMap(CODEC.mapToString(proposal.data())));
+    steward.data().put("purpose", "SEMANTIC");
+    steward.setSemanticContextJson("{\"fixture\":\"intent-evidence-version-guards\"}");
+    steward.getChanges().get(0).setBeforeValueJson("null");
+    admitted.getDecisions().get(0).setPublicationReview(steward);
+    admitted.getDecisions().get(0).getPublicationAttempt().setOutcomeJson("{\"status\":\"UNKNOWN_OR_CONTEXT_CHANGED\"}");
+    valid(admitted);
+    var stewardReadback = new EkopAgentRun(CODEC.stringToMap(CODEC.mapToString(admitted.data())));
+    require(stewardReadback.getDecisions().get(0).getPublicationReview().getSemanticContextJson().equals(steward.getSemanticContextJson()), "Steward context lost");
+    require(stewardReadback.getDecisions().get(0).getPublicationReview().getChanges().get(0).getBeforeValueJson().equals("null"), "Steward before-value lost");
+    require(stewardReadback.getDecisions().get(0).getPublicationAttempt().getOutcomeJson().contains("UNKNOWN_OR_CONTEXT_CHANGED"), "Uncertain publication outcome lost");
+    if (args.length == 1) {
+      var shapes = CODEC.stringToList(java.nio.file.Files.readString(java.nio.file.Path.of(args[0])));
+      require(!shapes.isEmpty(), "No native compiler shapes supplied");
+      for (var entry : shapes) {
+        var shape = (DataMap) entry;
+        var type = Class.forName(shape.getString("recordClass"));
+        var nativeRecord = (RecordTemplate) type.getConstructor(DataMap.class).newInstance(shape.getDataMap("value"));
+        valid(nativeRecord);
+      }
+      System.out.println("PASS: " + shapes.size() + " actual compiler outputs validated by pinned Core Pegasus schemas");
+    }
+    System.out.println("PASS: legacy Task/Run/Decision, publication, ETL and optional Steward context/before-values/outcome roundtrips; missing-field/purpose/action/outcome negatives; Host digest/ACL/CAS semantics are separate tests");
   }
 }
