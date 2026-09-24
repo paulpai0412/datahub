@@ -7,6 +7,7 @@ import { BrowserGrants, GrantError } from "./browser-grants.mjs";
 import { IngestionError } from "./native-ingestion.mjs";
 import { DiscoveryError } from "./native-discovery.mjs";
 import { SemanticError } from "./native-semantic.mjs";
+import { CatalogError } from "./native-catalog.mjs";
 import { TaskRecordError } from "./task-records.mjs";
 import manifest from "../pi-web/app/manifest.ts";
 import {
@@ -290,6 +291,7 @@ export async function createAgentGateway({
   taskRequest,
   discoveryRequest,
   semanticRequest,
+  catalogRequest,
   mfeDirectory,
   publicDirectory = fileURLToPath(
     new URL("../pi-web/public/", import.meta.url),
@@ -313,6 +315,7 @@ export async function createAgentGateway({
     ["/agent/tasks", { handler: taskRequest, name: "tasks" }],
     ["/agent/discovery", { handler: discoveryRequest, name: "discovery" }],
     ["/agent/semantic", { handler: semanticRequest, name: "semantic" }],
+    ["/agent/catalog", { handler: catalogRequest, name: "catalog" }],
   ]);
   const staticFiles = new Map();
   for (const name of await readdir(mfeDirectory)) {
@@ -436,7 +439,9 @@ export async function createAgentGateway({
               : ["grantId", "revokeToken"],
           request.url === "/agent/semantic"
             ? 49152 // JSON-escaped 24KB intent plus parent-only proof envelope.
-            : ["/agent/tasks", "/agent/discovery"].includes(request.url)
+            : ["/agent/tasks", "/agent/discovery", "/agent/catalog"].includes(
+                  request.url,
+                )
               ? 16384
               : 4096,
         );
@@ -554,6 +559,7 @@ export async function createAgentGateway({
         error instanceof IngestionError ||
         error instanceof DiscoveryError ||
         error instanceof SemanticError ||
+        error instanceof CatalogError ||
         error instanceof TaskRecordError;
       const status = knownError
         ? error.status

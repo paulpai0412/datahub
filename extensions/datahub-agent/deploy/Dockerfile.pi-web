@@ -31,6 +31,8 @@ CMD ["node", "/opt/datahub-agent/runtime-entry.mjs"]
 # Export ONLY immutable browser assets; never runtime HOME, config or server code.
 FROM scratch AS browser-assets
 COPY --from=runtime /app/.next/static /_next/static
+# Retain the license with the static icon paths in the browser-only export.
+COPY --from=runtime /app/public/licenses/PHOSPHOR-LICENSE.txt /_next/static/licenses/PHOSPHOR-LICENSE.txt
 COPY --from=runtime /app/.next/server/app/index.html /index.html
 
 # Preserve the original no-build/default test image behavior.

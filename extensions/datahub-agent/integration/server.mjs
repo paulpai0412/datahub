@@ -8,6 +8,11 @@ import { createRuntimeManager } from "./runtime-manager.mjs";
 import { validateEgressOrigins } from "./egress-proxy.mjs";
 import { ingestionPolicies } from "./ingestion-policy.mjs";
 import { nativeIngestion } from "./native-ingestion.mjs";
+import {
+  nativeCatalog,
+  CatalogError,
+  catalogPolicies,
+} from "./native-catalog.mjs";
 import { SemanticError } from "./native-semantic.mjs";
 import { semanticHost } from "./native-semantic-tasks.mjs";
 import { nativeTasks } from "./native-tasks.mjs";
@@ -35,6 +40,7 @@ const fields = new Set([
   "ingestionSourcesByActor",
   "discoverySourcesByActor",
   "fixedEtlGrantsByActor",
+  "catalogReadByActor",
 ]);
 
 /** Local-only entrypoint. Config is operator-owned, never supplied by a browser.
@@ -63,6 +69,7 @@ export async function startAgentServer(config) {
     validateEgressOrigins(origins);
     actorOrigins.set(key, [...origins]);
   }
+  const catalogScopes = catalogPolicies(config.catalogReadByActor);
   const sourcePolicies = ingestionPolicies(config.ingestionSourcesByActor);
   const executionPolicies = fixedEtlPolicies(
     config.fixedEtlGrantsByActor,
@@ -140,6 +147,15 @@ export async function startAgentServer(config) {
         const runtime = await manager.forActor(actor);
         manager.setAllowedOrigins(actor, actorOrigins.get(actor.key) ?? []);
         return runtime;
+      },
+      catalogRequest: (text, context) => {
+        const policy = catalogScopes.get(context.actor.key);
+        if (!policy) throw new CatalogError("catalog_not_configured", 403);
+        return nativeCatalog(text, {
+          ...context,
+          propertyNames: policy.propertyNames,
+          frontendOrigin: config.datahubOrigin,
+        });
       },
       ingestionRequest: (text, context) =>
         nativeIngestion(text, {

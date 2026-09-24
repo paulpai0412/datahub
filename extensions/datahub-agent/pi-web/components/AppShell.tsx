@@ -12,6 +12,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
+import {
+  CatalogContext,
+  DataHubCatalogDetail,
+  type CatalogSelection,
+} from "./DataHubCatalog";
+import catalogStyles from "./DataHubCatalog.module.css";
 import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
@@ -237,6 +243,15 @@ export function AppShell() {
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const sidebarWasOpen = useRef(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [catalogEntry, setCatalogEntry] = useState<{
+    selection: CatalogSelection;
+    session: string;
+    fileTab: string | null;
+  } | null>(null);
+  const catalogReturn = useRef({
+    open: false,
+    trigger: null as HTMLElement | null,
+  });
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
@@ -2739,8 +2754,65 @@ export function AppShell() {
     );
   };
 
+  const catalogSession = JSON.stringify([
+    selectedSession?.id ?? null,
+    sessionKey,
+  ]);
+  // Scope the displayed payload during render; effect cleanup is too late to
+  // prevent one frame of another session's details.
+  const catalogSelection =
+    catalogEntry?.session === catalogSession &&
+    catalogEntry.fileTab === activeFileTabId &&
+    !settingsSection
+      ? catalogEntry.selection
+      : null;
+  const openCatalog = useCallback(
+    (selection: CatalogSelection | null, restoreFocus = true) => {
+      if (!selection) {
+        if (!catalogSelection) return;
+        setCatalogEntry(null);
+        setRightPanelOpen(catalogReturn.current.open);
+        if (restoreFocus)
+          queueMicrotask(() => {
+            if (catalogReturn.current.trigger?.isConnected)
+              catalogReturn.current.trigger.focus();
+            else chatInputRef.current?.focus();
+          });
+        return;
+      }
+      if (!catalogSelection)
+        catalogReturn.current = {
+          open: rightPanelOpen,
+          trigger:
+            document.activeElement instanceof HTMLElement
+              ? document.activeElement
+              : null,
+        };
+      setCatalogEntry({
+        selection,
+        session: catalogSession,
+        fileTab: activeFileTabId,
+      });
+      setRightPanelOpen(true);
+    },
+    [catalogSelection, catalogSession, activeFileTabId, rightPanelOpen],
+  );
+  const closeCatalog = useCallback(() => openCatalog(null), [openCatalog]);
+  useEffect(() => {
+    if (catalogEntry && catalogEntry.session !== catalogSession) {
+      setCatalogEntry(null);
+      setRightPanelOpen(catalogReturn.current.open);
+    }
+  }, [catalogEntry, catalogSession]);
+  useEffect(() => {
+    setCatalogEntry(null);
+  }, [settingsSection, activeFileTabId]);
+  useEffect(() => {
+    if (!rightPanelOpen) setCatalogEntry(null);
+  }, [rightPanelOpen]);
+
   return (
-    <>
+    <CatalogContext.Provider value={DATAHUB_EMBED ? openCatalog : null}>
       <style>{`
       @keyframes session-info-pop {
         0% {
@@ -2851,6 +2923,8 @@ export function AppShell() {
       <div
         className={DATAHUB_EMBED ? "datahub-workbench" : undefined}
         style={{
+          position: DATAHUB_EMBED ? "relative" : undefined,
+          containerType: DATAHUB_EMBED ? "inline-size" : undefined,
           display: "flex",
           width: "100%",
           height: DATAHUB_EMBED
@@ -4022,10 +4096,12 @@ export function AppShell() {
 
         <div
           aria-hidden="true"
-          className={`right-panel-overlay-backdrop${rightPanelOpen ? " is-open" : ""}`}
-          onClick={() => setRightPanelOpen(false)}
+          className={`right-panel-overlay-backdrop${rightPanelOpen ? " is-open" : ""}${catalogSelection ? ` ${catalogStyles.backdrop}` : ""}`}
+          onClick={() =>
+            catalogSelection ? closeCatalog() : setRightPanelOpen(false)
+          }
         />
-        {rightPanelOpen && (
+        {rightPanelOpen && !catalogSelection && (
           <div
             {...rightPanelResizer.separatorProps}
             aria-controls="file-panel"
@@ -4039,7 +4115,7 @@ export function AppShell() {
         <div
           ref={rightPanelResizer.panelRef}
           id="file-panel"
-          className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}`}
+          className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}${catalogSelection ? ` ${catalogStyles.panel}` : ""}`}
           style={
             {
               "--right-panel-width": `${rightPanelResizer.width}px`,
@@ -4050,6 +4126,19 @@ export function AppShell() {
             } as React.CSSProperties
           }
         >
+          {catalogSelection && (
+            <div className={catalogStyles.slot}>
+              <DataHubCatalogDetail
+                key={JSON.stringify(catalogSelection)}
+                selection={catalogSelection}
+                onClose={closeCatalog}
+                onQuote={(reference) => {
+                  closeCatalog();
+                  chatInputRef.current?.addCatalogReference(reference);
+                }}
+              />
+            </div>
+          )}
           {/* Right panel tab bar */}
           <div
             style={{
@@ -4225,6 +4314,6 @@ export function AppShell() {
           onConfirm={() => void handleTrustProject()}
         />
       )}
-    </>
+    </CatalogContext.Provider>
   );
 }

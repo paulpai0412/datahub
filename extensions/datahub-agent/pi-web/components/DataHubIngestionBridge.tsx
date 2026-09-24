@@ -15,6 +15,7 @@ export function isDataHubHostRequest(
       "DataHub import readback",
       "DataHub discovery request",
       "DataHub semantic request",
+      "DataHub catalog request",
     ].includes(request.title)
   );
 }
@@ -107,7 +108,9 @@ export function DataHubHostBridge({
                     ? "datahub-discovery"
                     : request.title === "DataHub semantic request"
                       ? "datahub-semantic"
-                      : "datahub-ingestion",
+                      : request.title === "DataHub catalog request"
+                        ? "datahub-catalog"
+                        : "datahub-ingestion",
           body: request.placeholder,
           uiRequestId: request.id,
         },
@@ -152,7 +155,9 @@ export function DataHubHostBridge({
         }}
       >
         {notice ??
-          "Waiting for the trusted DataHub host. Source confirmations and Task decisions are handled outside this workspace."}
+          (request.title === "DataHub catalog request"
+            ? "正在以目前 DataHub 身分唯讀查詢…"
+            : "Waiting for the trusted DataHub host. Source confirmations and Task decisions are handled outside this workspace.")}
       </p>
     </div>
   );

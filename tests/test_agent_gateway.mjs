@@ -80,6 +80,7 @@ test("gateway real HTTP boundary with synthetic identity and runtime", async (t)
   const ingestionCalls = [];
   const taskCalls = [];
   const discoveryCalls = [];
+  const catalogCalls = [];
   const discoveryScopes = discoveryPolicies({
     [actors.alice.key]: [
       {
@@ -173,6 +174,15 @@ test("gateway real HTTP boundary with synthetic identity and runtime", async (t)
         },
       });
     },
+    catalogRequest: async (text, context) => {
+      context.assertActive();
+      catalogCalls.push({
+        text,
+        actor: context.actor.urn,
+        cookie: context.cookieHeader,
+      });
+      return { contract: "datahub.catalog.v1", actor: context.actor.urn };
+    },
     taskRequest: async (text, context) => {
       context.assertActive();
       assert.equal(context.runtime.password, password);
@@ -205,6 +215,86 @@ test("gateway real HTTP boundary with synthetic identity and runtime", async (t)
     });
   };
   try {
+    await t.test(
+      "catalog requires parent proof, fresh matching actor and active grant",
+      async () => {
+        const launch = (await bootstrap()).data;
+        const headers = { origin: frontend, cookie: "PLAY_SESSION=alice" };
+        const data = {
+          grantId: launch.grantId,
+          revokeToken: launch.revokeToken,
+          request: JSON.stringify({ action: "search", query: "orders" }),
+        };
+        for (const bad of [
+          { origin: frontend },
+          { ...headers, cookie: "PLAY_SESSION=bob" },
+          { ...headers, origin: new URL(launch.launchUrl).origin },
+        ]) {
+          assert.notEqual(
+            (
+              await call(port, "/agent/catalog", {
+                method: "POST",
+                headers: bad,
+                data,
+              })
+            ).status,
+            200,
+          );
+        }
+        assert.notEqual(
+          (
+            await call(port, "/agent/catalog", {
+              method: "POST",
+              headers,
+              data: { ...data, revokeToken: "wrong" },
+            })
+          ).status,
+          200,
+        );
+        assert.equal(catalogCalls.length, 0);
+        const success = await call(port, "/agent/catalog", {
+          method: "POST",
+          headers,
+          data,
+        });
+        assert.equal(success.status, 200);
+        assert.equal(success.data.actor, actors.alice.urn);
+        assert.deepEqual(catalogCalls, [
+          {
+            text: data.request,
+            actor: actors.alice.urn,
+            cookie: "PLAY_SESSION=alice",
+          },
+        ]);
+        assert.equal(
+          (
+            await call(port, "/agent/catalog", {
+              host: new URL(launch.launchUrl).host,
+              method: "POST",
+              headers: { origin: new URL(launch.launchUrl).origin },
+              data,
+            })
+          ).status,
+          403,
+        );
+        await call(port, "/agent/revoke", {
+          method: "POST",
+          headers,
+          data: { grantId: launch.grantId, revokeToken: launch.revokeToken },
+        });
+        assert.notEqual(
+          (
+            await call(port, "/agent/catalog", {
+              method: "POST",
+              headers,
+              data,
+            })
+          ).status,
+          200,
+        );
+        assert.equal(catalogCalls.length, 1);
+      },
+    );
     await t.test(
       "discovery checks parent origin, actor, grant, source scope and revocation",
       async () => {

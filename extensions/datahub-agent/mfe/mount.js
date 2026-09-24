@@ -1,5 +1,6 @@
 import { installIngestionBridge } from "./ingestion.js";
 import { installDiscoveryBridge } from "./discovery.js";
+import { installCatalogBridge } from "./catalog.js";
 import { installSemanticBridge } from "./semantic.js";
 import { installRegistryView } from "./registry.js";
 import { installTaskDecisionBridge } from "./task-decision.js";
@@ -35,6 +36,7 @@ export function mount(container) {
   let heartbeat;
   let stopIngestion;
   let stopDiscovery;
+  let stopCatalog;
   let stopSemantic;
   let stopRegistry;
   let stopDecisions;
@@ -56,7 +58,12 @@ export function mount(container) {
             AbortSignal.timeout(
               path === "/agent/tasks"
                 ? 90000
-                : ["/agent/ingestion", "/agent/discovery", "/agent/semantic"].includes(path)
+                : [
+                      "/agent/ingestion",
+                      "/agent/discovery",
+                      "/agent/semantic",
+                      "/agent/catalog",
+                    ].includes(path)
                   ? 45000
                   : 10000,
             ),
@@ -66,6 +73,7 @@ export function mount(container) {
   function failed() {
     stopIngestion?.();
     stopDiscovery?.();
+    stopCatalog?.();
     stopSemantic?.();
     stopDecisions?.();
     stopRegistry?.();
@@ -156,6 +164,19 @@ export function mount(container) {
           return response.json();
         },
       });
+      stopCatalog = installCatalogBridge({
+        frame,
+        origin: launch.origin,
+        send: async (request, signal) => {
+          const response = await post(
+            "/agent/catalog",
+            { grantId, revokeToken, request: JSON.stringify(request) },
+            false,
+            signal,
+          );
+          return response.json();
+        },
+      });
       stopDiscovery = installDiscoveryBridge({
         frame,
         origin: launch.origin,
@@ -204,6 +225,7 @@ export function mount(container) {
   return () => {
     stopIngestion?.();
     stopDiscovery?.();
+    stopCatalog?.();
     stopSemantic?.();
     stopDecisions?.();
     stopRegistry?.();

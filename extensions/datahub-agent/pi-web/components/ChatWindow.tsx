@@ -3,6 +3,7 @@ import { registerAbortHandler } from "@/hooks/useKeyboardShortcuts";
 import { DATAHUB_EMBED } from "@/lib/theme";
 import {
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -37,6 +38,7 @@ import {
   type WrittenFile,
 } from "@/lib/turn-written-files";
 import { buildQuotedSelection } from "@/lib/quoted-selection";
+import { CatalogContext } from "@/lib/catalog-context";
 import { MessageView } from "./MessageView";
 import { ChatInput, type ChatInputHandle } from "./ChatInput";
 import { ChatMinimap, useMessageRefs } from "./ChatMinimap";
@@ -533,6 +535,20 @@ export function ChatWindow({
     onSessionStatsPanelOpen,
     deferInitialScroll: Boolean(pendingScrollRestore),
   });
+  const catalogControl = useContext(CatalogContext);
+  const blockingCatalogDialog = Boolean(
+    extensionCustomUi ||
+      (extensionDialog &&
+        (!isDataHubHostRequest(extensionDialog) ||
+          ["DataHub task decision", "DataHub workspace import"].includes(
+            extensionDialog.title,
+          ))),
+  );
+  // Keep this independent of Host request forwarding: closing a local panel
+  // must never restart a request or replay a decision/publication.
+  useLayoutEffect(() => {
+    if (blockingCatalogDialog) catalogControl?.(null, false);
+  }, [blockingCatalogDialog, catalogControl]);
   const sessionBusy = agentRunning || bashRunning;
   const [quotedSelection, setQuotedSelection] = useState<{
     text: string;
@@ -2333,6 +2349,18 @@ function ExtensionDialog({
   const [collapsed, setCollapsed] = useState(false);
   const [now, setNow] = useState(() => Date.now());
   const summary = getExtensionDialogSummary(request);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const catalogControl = useContext(CatalogContext);
+  // A Catalog modal may have made this column inert when React attempted
+  // autoFocus. Focus the dialog after panel cleanup, never an approval button.
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      const dialog = dialogRef.current;
+      if (dialog && !dialog.contains(document.activeElement))
+        dialog.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [request.id, collapsed, catalogControl]);
   const remainingSeconds =
     request.expiresAt === undefined
       ? null
@@ -2455,6 +2483,8 @@ function ExtensionDialog({
       ) : (
         <div
           role="dialog"
+          ref={dialogRef}
+          tabIndex={-1}
           aria-label={request.title}
           style={{
             pointerEvents: "auto",
