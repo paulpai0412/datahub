@@ -8,6 +8,11 @@ import { join } from "node:path";
 import { isValidWebSessionToken } from "../extensions/datahub-agent/pi-web/lib/web-auth.ts";
 import { createAgentGateway } from "../extensions/datahub-agent/integration/gateway.mjs";
 import { TaskRecordError } from "../extensions/datahub-agent/integration/task-records.mjs";
+import { GrafanaError } from "../extensions/datahub-agent/integration/native-grafana.mjs";
+import {
+  createSqlHost,
+  sqlPolicies,
+} from "../extensions/datahub-agent/integration/native-sql.mjs";
 import {
   nativeDiscovery,
   discoveryPolicies,
@@ -80,6 +85,7 @@ test("gateway real HTTP boundary with synthetic identity and runtime", async (t)
   const ingestionCalls = [];
   const taskCalls = [];
   const discoveryCalls = [];
+  const catalogCalls = [];
   const discoveryScopes = discoveryPolicies({
     [actors.alice.key]: [
       {
@@ -128,8 +134,46 @@ test("gateway real HTTP boundary with synthetic identity and runtime", async (t)
   runtimeServer.listen(0, "127.0.0.1");
   await once(runtimeServer, "listening");
   let now = 0;
+  let sqlSourceCalls = 0;
+  const sql = createSqlHost({
+    now: () => now,
+    policies: sqlPolicies({
+      [actors.alice.key]: {
+        chartUrn: "urn:li:chart:(grafana,dataflow-sales-v1.5)",
+        dashboardUrn: "urn:li:dashboard:(grafana,dataflow-sales-v1)",
+        dashboardSha256: "a".repeat(64),
+        datasetUrn:
+          "urn:li:dataset:(urn:li:dataPlatform:mssql,salesdatamart.reporting.v_sales_order_line,PROD)",
+        expiresAt: 100_000,
+        panelId: 5,
+        commonScopeApproved: true,
+        sourceSelectApproved: true,
+        grafanaQueryApproved: true,
+      },
+    }),
+    authorizeAssets: async ({ actor }) => actor.key === actors.alice.key,
+    executeSource: async () => {
+      sqlSourceCalls++;
+      return {
+        complete: true,
+        observedAt: "2026-09-24T12:00:00Z",
+        dataAsOf: null,
+        points: [
+          { month: "2014-06-01", category: "Bikes", salesAmount: "120.500000" },
+        ],
+      };
+    },
+    compareGrafana: async () => ({
+      chartUrn: "urn:li:chart:(grafana,dataflow-sales-v1.5)",
+      dashboardUrn: "urn:li:dashboard:(grafana,dataflow-sales-v1)",
+      dashboardSha256: "a".repeat(64),
+      panelId: 5,
+      totals: [{ category: "Bikes", salesAmount: "120.500000" }],
+    }),
+  });
   let provisioningTime = 0;
   let provisioned = 0;
+  let queryGrant = null;
   const grants = new BrowserGrants({
     clock: () => now,
     ticketMs: 10,
@@ -173,6 +217,33 @@ test("gateway real HTTP boundary with synthetic identity and runtime", async (t)
         },
       });
     },
+    catalogRequest: async (text, context) => {
+      context.assertActive();
+      catalogCalls.push({
+        text,
+        actor: context.actor.urn,
+        cookie: context.cookieHeader,
+      });
+      return { contract: "datahub.catalog.v1", actor: context.actor.urn };
+    },
+    grafanaRequest: async (text, context) => {
+      context.assertActive();
+      if (text === "denied") throw new GrafanaError("grafana_scope_denied");
+      return { actor: context.actor.urn, action: "display_only" };
+    },
+    grafanaData: async (displayRef, { assertGrant, viewerLogin, orgId }) => {
+      if (
+        displayRef !== "11111111-1111-4111-8111-111111111111" ||
+        viewerLogin !== "b-viewer" ||
+        orgId !== "org-2"
+      )
+        throw new GrafanaError("grafana_scope_denied");
+      assertGrant(queryGrant, actors.alice.key);
+      return [{ status: "PREAUTHORIZED_UNIT_ONLY" }];
+    },
+    grafanaServiceKey: "c".repeat(43),
+    sqlRequest: sql.execute,
+    sqlResultRequest: sql.readResult,
     taskRequest: async (text, context) => {
       context.assertActive();
       assert.equal(context.runtime.password, password);
@@ -205,6 +276,325 @@ test("gateway real HTTP boundary with synthetic identity and runtime", async (t)
     });
   };
   try {
+    await t.test(
+      "Grafana display route requires parent proof, current actor and unrevoked grant",
+      async () => {
+        const launch = (await bootstrap()).data;
+        const headers = { origin: frontend, cookie: "PLAY_SESSION=alice" };
+        const data = {
+          grantId: launch.grantId,
+          revokeToken: launch.revokeToken,
+          request: "display",
+        };
+        for (const bad of [
+          { origin: frontend },
+          { ...headers, cookie: "PLAY_SESSION=bob" },
+          { ...headers, origin: new URL(launch.launchUrl).origin },
+        ]) {
+          assert.notEqual(
+            (
+              await call(port, "/agent/grafana", {
+                method: "POST",
+                headers: bad,
+                data,
+              })
+            ).status,
+            200,
+          );
+        }
+        assert.equal(
+          (
+            await call(port, "/agent/grafana", {
+              method: "POST",
+              headers,
+              data,
+            })
+          ).data.actor,
+          actors.alice.urn,
+        );
+        const denied = await call(port, "/agent/grafana", {
+          method: "POST",
+          headers,
+          data: { ...data, request: "denied" },
+        });
+        assert.equal(denied.status, 403);
+        assert.equal(denied.data.error, "grafana_scope_denied");
+        assert.notEqual(
+          (
+            await call(port, "/agent/grafana", {
+              method: "POST",
+              headers,
+              data: { ...data, revokeToken: "wrong" },
+            })
+          ).status,
+          200,
+        );
+        await call(port, "/agent/revoke", {
+          method: "POST",
+          headers,
+          data: { grantId: data.grantId, revokeToken: data.revokeToken },
+        });
+        assert.notEqual(
+          (
+            await call(port, "/agent/grafana", {
+              method: "POST",
+              headers,
+              data,
+            })
+          ).status,
+          200,
+        );
+      },
+    );
+    await t.test(
+      "unit: Grafana aggregate GET requires server-only secret, viewer identity and unrevoked grant",
+      async () => {
+        const launch = (await bootstrap()).data;
+        await exchange(launch.launchUrl);
+        queryGrant = launch.grantId;
+        const path =
+          "/agent/grafana-data?display=11111111-1111-4111-8111-111111111111";
+        const backend = {
+          "x-datahub-grafana-auth": "c".repeat(43),
+          "x-datahub-grafana-login": "b-viewer",
+          "x-datahub-grafana-org": "org-2",
+        };
+        assert.equal((await call(port, path)).status, 403);
+        assert.equal(
+          (await call(port, path, { headers: backend })).status,
+          200,
+        );
+        for (const bad of [
+          { origin: "http://evil.test" },
+          { "x-datahub-grafana-auth": "d".repeat(43) },
+          { "x-datahub-grafana-auth": ["c".repeat(43), "d".repeat(43)] },
+          { "x-datahub-grafana-login": "other" },
+          { "x-datahub-grafana-login": ["b-viewer", "other"] },
+          { "x-datahub-grafana-org": "default" },
+          { "x-datahub-grafana-org": "2" },
+        ])
+          assert.equal(
+            (await call(port, path, { headers: { ...backend, ...bad } }))
+              .status,
+            403,
+          );
+        assert.equal(
+          (
+            await call(port, `${path}&url=http://evil.test`, {
+              headers: backend,
+            })
+          ).status,
+          403,
+        );
+        assert.equal(
+          (
+            await call(port, "/agent/grafana-data?cap=guess", {
+              headers: backend,
+            })
+          ).status,
+          403,
+        );
+        await call(port, "/agent/revoke", {
+          method: "POST",
+          headers: { origin: frontend, cookie: "PLAY_SESSION=alice" },
+          data: { grantId: launch.grantId, revokeToken: launch.revokeToken },
+        });
+        const revoked = await call(port, path, { headers: backend });
+        assert.equal(revoked.status, 401);
+        assert.equal(revoked.data.error, "authentication_required");
+      },
+    );
+    await t.test(
+      "catalog requires parent proof, fresh matching actor and active grant",
+      async () => {
+        const launch = (await bootstrap()).data;
+        const headers = { origin: frontend, cookie: "PLAY_SESSION=alice" };
+        const data = {
+          grantId: launch.grantId,
+          revokeToken: launch.revokeToken,
+          request: JSON.stringify({ action: "search", query: "orders" }),
+        };
+        for (const bad of [
+          { origin: frontend },
+          { ...headers, cookie: "PLAY_SESSION=bob" },
+          { ...headers, origin: new URL(launch.launchUrl).origin },
+        ]) {
+          assert.notEqual(
+            (
+              await call(port, "/agent/catalog", {
+                method: "POST",
+                headers: bad,
+                data,
+              })
+            ).status,
+            200,
+          );
+        }
+        assert.notEqual(
+          (
+            await call(port, "/agent/catalog", {
+              method: "POST",
+              headers,
+              data: { ...data, revokeToken: "wrong" },
+            })
+          ).status,
+          200,
+        );
+        assert.equal(catalogCalls.length, 0);
+        const success = await call(port, "/agent/catalog", {
+          method: "POST",
+          headers,
+          data,
+        });
+        assert.equal(success.status, 200);
+        assert.equal(success.data.actor, actors.alice.urn);
+        assert.deepEqual(catalogCalls, [
+          {
+            text: data.request,
+            actor: actors.alice.urn,
+            cookie: "PLAY_SESSION=alice",
+          },
+        ]);
+        assert.equal(
+          (
+            await call(port, "/agent/catalog", {
+              host: new URL(launch.launchUrl).host,
+              method: "POST",
+              headers: { origin: new URL(launch.launchUrl).origin },
+              data,
+            })
+          ).status,
+          403,
+        );
+        await call(port, "/agent/revoke", {
+          method: "POST",
+          headers,
+          data: { grantId: launch.grantId, revokeToken: launch.revokeToken },
+        });
+        assert.notEqual(
+          (
+            await call(port, "/agent/catalog", {
+              method: "POST",
+              headers,
+              data,
+            })
+          ).status,
+          200,
+        );
+        assert.equal(catalogCalls.length, 1);
+      },
+    );
+    await t.test(
+      "SQL requires parent actor proof; history read is a fresh grant check, not a replay",
+      async () => {
+        const launch = (await bootstrap()).data;
+        const headers = { origin: frontend, cookie: "PLAY_SESSION=alice" };
+        const data = {
+          grantId: launch.grantId,
+          revokeToken: launch.revokeToken,
+          request: JSON.stringify({
+            action: "execute",
+            metric: "sales_by_category",
+            from: "2014-06-01",
+            through: "2014-06-30",
+            requestId: "11111111-1111-4111-8111-111111111111",
+          }),
+        };
+        for (const bad of [
+          { origin: frontend },
+          { ...headers, cookie: "PLAY_SESSION=bob" },
+          { ...headers, origin: "http://attacker.invalid" },
+        ]) {
+          assert.notEqual(
+            (
+              await call(port, "/agent/sql", {
+                method: "POST",
+                headers: bad,
+                data,
+              })
+            ).status,
+            200,
+          );
+        }
+        assert.equal(sqlSourceCalls, 0);
+        assert.equal(
+          (
+            await call(port, "/agent/sql", {
+              method: "POST",
+              headers,
+              data: {
+                ...data,
+                request: JSON.stringify({
+                  ...JSON.parse(data.request),
+                  rawSql: "SELECT password",
+                }),
+              },
+            })
+          ).status,
+          400,
+        );
+        assert.equal(sqlSourceCalls, 0);
+        const executed = await call(port, "/agent/sql", {
+          method: "POST",
+          headers,
+          data,
+        });
+        assert.equal(executed.status, 200);
+        assert.equal(
+          JSON.stringify(executed.data).includes("120.500000"),
+          false,
+        );
+        const read = {
+          ...data,
+          request: JSON.stringify({
+            action: "read_result",
+            resultRef: executed.data.resultRef,
+          }),
+        };
+        const card = await call(port, "/agent/sql-result", {
+          method: "POST",
+          headers,
+          data: read,
+        });
+        assert.equal(card.status, 200);
+        assert.equal(card.data.points[0].salesAmount, "120.500000");
+        assert.equal(sqlSourceCalls, 1);
+        assert.equal(
+          (
+            await call(port, "/agent/sql-result", {
+              method: "POST",
+              headers: { ...headers, cookie: "PLAY_SESSION=bob" },
+              data: read,
+            })
+          ).status,
+          401,
+        );
+        assert.equal(
+          (
+            await call(port, "/agent/revoke", {
+              method: "POST",
+              headers,
+              data: {
+                grantId: launch.grantId,
+                revokeToken: launch.revokeToken,
+              },
+            })
+          ).status,
+          200,
+        );
+        assert.notEqual(
+          (
+            await call(port, "/agent/sql-result", {
+              method: "POST",
+              headers,
+              data: read,
+            })
+          ).status,
+          200,
+        );
+        assert.equal(sqlSourceCalls, 1);
+      },
+    );
     await t.test(
       "discovery checks parent origin, actor, grant, source scope and revocation",
       async () => {

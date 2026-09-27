@@ -74,6 +74,72 @@ class SalesDatamartETLTests(unittest.TestCase):
             etl._fetch(conn, "fixed-query")
         result.close.assert_called_once()
 
+    def test_view_must_preserve_rows_within_the_approved_scope(self) -> None:
+        extracted = _extracted()
+        scope = Scope()
+        fact_metrics = {
+            "fact_count": 1,
+            "quantity": extracted.quantity,
+            "line_net_amount": extracted.expected_line_net_amount,
+            "source_line_total": extracted.source_line_total,
+            "order_count": extracted.order_count,
+        }
+        for total_rows, scoped_rows, allowed in ((1, 0, False), (1, 1, True), (2, 2, False)):
+            with self.subTest(total_rows=total_rows, scoped_rows=scoped_rows):
+                def read_view(_conn, statement, params):
+                    self.assertIs(statement, etl._VIEW_METRICS_SQL)
+                    self.assertEqual(params["start_date"], scope.start_date)
+                    self.assertEqual(params["end_date"], scope.end_date)
+                    self.assertEqual(params["status"], scope.status)
+                    # Prior out-of-scope rows could mask missing or duplicated
+                    # view rows when only the unfiltered total was compared.
+                    return [{"reporting_view_count": total_rows,
+                             "reporting_view_scope_count": scoped_rows,
+                             "reporting_view_quantity": extracted.quantity,
+                             "reporting_view_line_net_amount": extracted.expected_line_net_amount,
+                             "reporting_view_source_line_total": extracted.source_line_total,
+                             "reporting_view_order_count": extracted.order_count}]
+
+                with patch.object(etl, "_target_metrics", return_value=fact_metrics), patch.object(
+                    etl, "_fetch", side_effect=read_view
+                ):
+                    if allowed:
+                        result = etl._validate_target(MagicMock(), extracted, scope)
+                        self.assertEqual(result["reporting_view_count"], 1)
+                    else:
+                        with self.assertRaisesRegex(etl.ETLError, "reporting_view_scope_mismatch"):
+                            etl._validate_target(MagicMock(), extracted, scope)
+
+    def test_view_same_count_with_wrong_amount_or_order_is_not_committable(self) -> None:
+        extracted = _extracted()
+        scope = Scope()
+        fact_metrics = {
+            "fact_count": 1,
+            "quantity": extracted.quantity,
+            "line_net_amount": extracted.expected_line_net_amount,
+            "source_line_total": extracted.source_line_total,
+            "order_count": extracted.order_count,
+        }
+        matching = {
+            "reporting_view_count": 1,
+            "reporting_view_scope_count": 1,
+            "reporting_view_quantity": extracted.quantity,
+            "reporting_view_line_net_amount": extracted.expected_line_net_amount,
+            "reporting_view_source_line_total": extracted.source_line_total,
+            "reporting_view_order_count": extracted.order_count,
+        }
+        for field, wrong in (
+            ("reporting_view_quantity", Decimal("3.000000")),
+            ("reporting_view_line_net_amount", Decimal("19.000000")),
+            ("reporting_view_source_line_total", Decimal("19.000000")),
+            ("reporting_view_order_count", 2),
+        ):
+            with self.subTest(field=field), patch.object(etl, "_target_metrics", return_value=fact_metrics), patch.object(
+                etl, "_fetch", return_value=[{**matching, field: wrong}]
+            ):
+                with self.assertRaisesRegex(etl.ETLError, "reporting_view_metrics_mismatch"):
+                    etl._validate_target(MagicMock(), extracted, scope)
+
     def test_failed_target_lock_prevents_source_extraction(self) -> None:
         with patch.object(etl, "_acquire_lock", side_effect=etl.ETLError("lock_busy")), patch.object(etl, "extract") as extract:
             with self.assertRaisesRegex(etl.ETLError, "lock_busy"):
@@ -115,6 +181,59 @@ class SalesDatamartETLTests(unittest.TestCase):
         empty = Extracted(sample.products, sample.customers, sample.territories, ())
         with self.assertRaisesRegex(EmptySourceError, "empty_approved_scope"):
             _validate_extracted(empty, Scope())
+
+    def test_receipt_aov_uses_panel_half_away_rounding_on_six_place_tie(self) -> None:
+        first = _extracted().facts[0]
+        rows = (
+            replace(first, sales_order_id=10, order_qty=1,
+                    unit_price=Decimal("0.5000"), unit_price_discount=Decimal("0"),
+                    line_net_amount=Decimal("0.500000"), source_line_total=Decimal("0.500000")),
+            replace(first, sales_order_id=11, sales_order_detail_id=2, order_qty=1,
+                    unit_price=Decimal("0.5050"), unit_price_discount=Decimal("0.0099"),
+                    line_net_amount=Decimal("0.500001"), source_line_total=Decimal("0.500001")),
+        )
+        extracted = _extracted(facts=rows)
+        _validate_extracted(extracted, Scope())
+        for row in rows:
+            self.assertEqual(row.line_net_amount, _line_net_amount(row.order_qty, row.unit_price, row.unit_price_discount))
+        metrics = {"fact_count": 2, "quantity": 2, "line_net_amount": Decimal("1.000001"),
+                   "source_line_total": Decimal("1.000001"), "order_count": 2,
+                   "reporting_view_count": 2}
+        self.assertEqual(etl._receipt(Scope(), extracted, metrics, 1)["reconciliation"]["aov"], "0.500001")
+
+    def test_source_dimension_zero_cannot_overwrite_unknown_member(self) -> None:
+        sample = _extracted()
+        _validate_extracted(sample, Scope())
+        cases = (
+            ("product_id", replace(sample, products=(replace(sample.products[0], source_product_id=0),))),
+            ("customer_id", replace(sample, customers=(replace(sample.customers[0], source_customer_id=0),))),
+            ("territory_id", replace(sample, territories=(replace(sample.territories[0], source_territory_id=0),))),
+        )
+        for name, extracted in cases:
+            with self.subTest(dimension=name):
+                with self.assertRaisesRegex(SourceValidationError, f"reserved_{name}_zero"):
+                    _validate_extracted(extracted, Scope())
+
+    def test_target_unknown_member_drift_blocks_first_dimension_write(self) -> None:
+        for returned in ([], [{"canonical": 0}], [{"canonical": 1}, {"canonical": 1}]):
+            with self.subTest(returned=returned), patch.object(etl, "_fetch", return_value=returned), patch.object(etl, "_execute_many") as write:
+                with self.assertRaisesRegex(etl.ETLError, "target_unknown_member_invalid"):
+                    etl._load_dimensions(MagicMock(), _extracted(), Scope())
+                write.assert_not_called()
+
+    def test_canonical_target_unknown_members_keep_normal_dimension_mapping(self) -> None:
+        rows = (
+            [{"canonical": 1}],
+            [{"source_territory_id": 0, "territory_key": 0}, {"source_territory_id": 1, "territory_key": 7}],
+            [{"source_product_id": 0, "product_key": 0}, {"source_product_id": 1, "product_key": 8}],
+            [{"source_customer_id": 0, "customer_key": 0}, {"source_customer_id": 1, "customer_key": 9}],
+        )
+        with patch.object(etl, "_fetch", side_effect=rows) as fetch, patch.object(etl, "_execute_many") as write:
+            products, customers, territories = etl._load_dimensions(MagicMock(), _extracted(), Scope())
+        self.assertEqual((products[1], customers[1], territories[1]), (8, 9, 7))
+        self.assertEqual(fetch.call_count, 4)
+        self.assertIs(fetch.call_args_list[0].args[1], etl._UNKNOWN_MEMBERS_SQL)
+        self.assertEqual(write.call_count, 7)
 
     def test_duplicate_fact_key_is_rejected(self) -> None:
         row = _extracted().facts[0]

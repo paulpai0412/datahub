@@ -7,10 +7,14 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, { tsconfigPaths: true });
-const { AgentSessionWrapper } = await jiti.import("./rpc-manager.ts");
+const { AgentSessionWrapper, withExtensionTools } =
+  await jiti.import("./rpc-manager.ts");
 
 test("get_tools preserves the SDK tool definition fields", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
   const getToolsSource = source.slice(
     source.indexOf('case "get_tools"'),
     source.indexOf('case "get_commands"'),
@@ -21,9 +25,85 @@ test("get_tools preserves the SDK tool definition fields", async () => {
   assert.match(getToolsSource, /active: active\.has\(t\.name\)/);
 });
 
+test("DataHub-only selection activates exactly three intent tools, no coding or other extensions", () => {
+  const names = [
+    "read",
+    "bash",
+    "datahub_catalog",
+    "datahub_sql",
+    "datahub_grafana",
+    "datahub_ingestion",
+    "Agent",
+  ];
+  const session = {
+    getAllTools: () => names.map((name) => ({ name })),
+    settingsManager: { getDefaultTools: () => ["bash", "read"] },
+  };
+  const approved = ["datahub_catalog", "datahub_sql", "datahub_grafana"];
+  assert.deepEqual(withExtensionTools(session, approved), approved);
+  assert.deepEqual(withExtensionTools(session, []), []);
+  assert.ok(
+    withExtensionTools(session, ["read"]).includes("datahub_ingestion"),
+    "legacy nonempty presets remain unchanged",
+  );
+  assert.deepEqual(
+    withExtensionTools(
+      { ...session, getAllTools: () => [{ name: "datahub_catalog" }] },
+      approved,
+    ),
+    ["datahub_catalog"],
+    "unavailable tools are never invented",
+  );
+});
+
+test("a tool registered during extension binding cannot widen DataHub-only selection", async () => {
+  const approved = ["datahub_catalog", "datahub_sql", "datahub_grafana"];
+  const tools = [...approved];
+  let active = [...approved];
+  const inner = {
+    sessionId: "datahub-only-binding-test",
+    isBashRunning: false,
+    agent: { state: {} },
+    sessionManager: { getCwd: () => "/tmp" },
+    getAllTools: () => tools.map((name) => ({ name })),
+    getActiveToolNames: () => active,
+    setActiveToolsByName: (names) => {
+      active = [...names];
+    },
+    async bindExtensions() {
+      tools.push("mcp", "read");
+      active.push("mcp", "read");
+    },
+    dispose() {},
+    extensionRunner: {},
+  };
+  const wrapper = new AgentSessionWrapper(inner, {
+    selectedToolNames: approved,
+  });
+  try {
+    wrapper.beginExtensionBinding();
+    const observed = await wrapper.send({ type: "get_tools" });
+    assert.deepEqual(
+      observed
+        .filter((entry) => entry.active)
+        .map((entry) => entry.name)
+        .sort(),
+      [...approved].sort(),
+    );
+    assert.deepEqual(active.sort(), [...approved].sort());
+  } finally {
+    wrapper.destroy();
+  }
+});
+
 test("RPC session startup preloads extension-registered providers before restoring models", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
-  const startupSource = source.slice(source.indexOf("export async function startRpcSession"));
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
+  const startupSource = source.slice(
+    source.indexOf("export async function startRpcSession"),
+  );
 
   assert.match(startupSource, /createAgentSessionServices\(/);
   assert.match(startupSource, /createAgentSessionFromServices\(/);
@@ -31,52 +111,120 @@ test("RPC session startup preloads extension-registered providers before restori
 });
 
 test("built-in subagents persist their selected resource policy", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
-  const subagentSource = await readFile(new URL("./subagent-runtime.ts", import.meta.url), "utf8");
-  const startupSource = source.slice(source.indexOf("export async function startRpcSession"));
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
+  const subagentSource = await readFile(
+    new URL("./subagent-runtime.ts", import.meta.url),
+    "utf8",
+  );
+  const startupSource = source.slice(
+    source.indexOf("export async function startRpcSession"),
+  );
 
-  const parentBinding = /SessionManager\.create\(parent\.cwd, undefined, \{\s*parentSession: parent\.sessionFile,?\s*\}\)/;
+  const parentBinding =
+    /SessionManager\.create\(parent\.cwd, undefined, \{\s*parentSession: parent\.sessionFile,?\s*\}\)/;
   assert.match(subagentSource, parentBinding);
-  assert.doesNotMatch(subagentSource.match(parentBinding)[0].replace("parentSession:", "otherSession:"), parentBinding);
+  assert.doesNotMatch(
+    subagentSource
+      .match(parentBinding)[0]
+      .replace("parentSession:", "otherSession:"),
+    parentBinding,
+  );
   assert.match(subagentSource, /appendCustomEntry\(SUBAGENT_META_TYPE/);
   assert.match(subagentSource, /appendCustomEntry\(SUBAGENT_RESULT_TYPE/);
   assert.match(subagentSource, /dependencies\.registerSession\(inner, \{/);
   assert.match(subagentSource, /noExtensions: !profile\.loadExtensions/);
   assert.match(subagentSource, /noSkills: !profile\.loadSkills/);
-  assert.match(subagentSource, /excludeTools: \[\.\.\.SUBAGENT_CONTROL_TOOL_NAMES\]/);
-  assert.match(subagentSource, /withSubagentExtensionTools\(profile\.tools, extensionToolNames\)/);
+  assert.match(
+    subagentSource,
+    /excludeTools: \[\.\.\.SUBAGENT_CONTROL_TOOL_NAMES\]/,
+  );
+  assert.match(
+    subagentSource,
+    /withSubagentExtensionTools\(profile\.tools, extensionToolNames\)/,
+  );
   assert.match(subagentSource, /resourceSnapshot:/);
   assert.match(startupSource, /readSubagentSessionResources\(/);
   assert.match(startupSource, /resourceLoaderOptions: subagentResources/);
-  assert.match(startupSource, /appendSystemPrompt: subagentResources\.appendSystemPrompt/);
-  assert.match(startupSource, /noExtensions: !subagentResources\.loadExtensions/);
+  assert.match(
+    startupSource,
+    /appendSystemPrompt: subagentResources\.appendSystemPrompt/,
+  );
+  assert.match(
+    startupSource,
+    /noExtensions: !subagentResources\.loadExtensions/,
+  );
   assert.match(startupSource, /noSkills: !subagentResources\.loadSkills/);
-  assert.match(startupSource, /excludeTools: \[\.\.\.SUBAGENT_CONTROL_TOOL_NAMES\]/);
-  assert.match(startupSource, /let toolsOption: string\[\] \| undefined = subagentResources\?\.tools/);
+  assert.match(
+    startupSource,
+    /excludeTools: \[\.\.\.SUBAGENT_CONTROL_TOOL_NAMES\]/,
+  );
+  assert.match(
+    startupSource,
+    /let toolsOption: string\[\] \| undefined = subagentResources\?\.tools/,
+  );
   assert.match(source, /createSubagentController\(/);
   assert.match(source, /suppressCompletionNotifications: true/);
-  assert.match(source, /suppressCompletionNotifications: Boolean\(subagentResources\)/);
-  assert.match(startupSource, /createSubagentExtension\([\s\S]*?SUBAGENT_CONTROLLER\.extensionRuntime,[\s\S]*?\(\) => listSubagentProfiles\(sessionCwd\),[\s\S]*?isBuiltInSubagentsEnabled/);
+  assert.match(
+    source,
+    /suppressCompletionNotifications: Boolean\(subagentResources\)/,
+  );
+  assert.match(
+    startupSource,
+    /createSubagentExtension\([\s\S]*?SUBAGENT_CONTROLLER\.extensionRuntime,[\s\S]*?\(\) => listSubagentProfiles\(sessionCwd\),[\s\S]*?isBuiltInSubagentsEnabled/,
+  );
   assert.match(startupSource, /preferPiWebSubagentExtension\(base\)/);
 });
 
 test("running snapshots expose sessions with suppressed completion notifications", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
-  const runningRouteSource = await readFile(new URL("../app/api/agent/running/route.ts", import.meta.url), "utf8");
-  const sessionsRouteSource = await readFile(new URL("../app/api/sessions/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
+  const runningRouteSource = await readFile(
+    new URL("../app/api/agent/running/route.ts", import.meta.url),
+    "utf8",
+  );
+  const sessionsRouteSource = await readFile(
+    new URL("../app/api/sessions/route.ts", import.meta.url),
+    "utf8",
+  );
   const snapshotSource = source.slice(
-    source.indexOf("export function getCompletionNotificationSuppressedRpcSessionIds"),
-    source.indexOf("// ----------------------------------------------------------------------------", source.indexOf("export function getCompletionNotificationSuppressedRpcSessionIds")),
+    source.indexOf(
+      "export function getCompletionNotificationSuppressedRpcSessionIds",
+    ),
+    source.indexOf(
+      "// ----------------------------------------------------------------------------",
+      source.indexOf(
+        "export function getCompletionNotificationSuppressedRpcSessionIds",
+      ),
+    ),
   );
 
-  assert.match(snapshotSource, /session\.isRunning\(\) && session\.hasSuppressedCompletionNotifications\(\)/);
-  assert.match(runningRouteSource, /completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds\(\)/);
-  assert.match(sessionsRouteSource, /completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds\(\)/);
+  assert.match(
+    snapshotSource,
+    /session\.isRunning\(\) && session\.hasSuppressedCompletionNotifications\(\)/,
+  );
+  assert.match(
+    runningRouteSource,
+    /completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds\(\)/,
+  );
+  assert.match(
+    sessionsRouteSource,
+    /completionNotificationSuppressedSessionIds: getCompletionNotificationSuppressedRpcSessionIds\(\)/,
+  );
 });
 
 test("RPC session startup resolves and passes the SDK-native enabled model scope", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
-  const startupSource = source.slice(source.indexOf("export async function startRpcSession"));
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
+  const startupSource = source.slice(
+    source.indexOf("export async function startRpcSession"),
+  );
   const resolveIndex = startupSource.indexOf("resolveVisibleModels(");
   const createIndex = startupSource.indexOf("createAgentSessionFromServices(");
 
@@ -89,30 +237,58 @@ test("RPC session startup resolves and passes the SDK-native enabled model scope
 });
 
 test("RPC session startup treats only sessions with messages as continuing", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
-  const startupSource = source.slice(source.indexOf("export async function startRpcSession"));
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
+  const startupSource = source.slice(
+    source.indexOf("export async function startRpcSession"),
+  );
 
   assert.match(
     startupSource,
     /const hasExistingMessages = branch\.some\(\s*\(entry\) => entry\.type === "message",?\s*\)/,
   );
   assert.match(startupSource, /const initial = hasExistingMessages/);
-  assert.match(startupSource, /getLatestModelChange\(branch as unknown as SessionEntry\[\]\)/);
+  assert.match(
+    startupSource,
+    /getLatestModelChange\(branch as unknown as SessionEntry\[\]\)/,
+  );
   assert.match(startupSource, /model: startupModel/);
   assert.doesNotMatch(startupSource, /const initial = sessionFile/);
   assert.doesNotMatch(startupSource, /sessionManager\.buildSessionContext\(\)/);
 });
 
 test("RPC session startup opens an existing session file only once and trusts its cwd", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
-  const startupSource = source.slice(source.indexOf("export async function startRpcSession"));
-  const routeSource = await readFile(new URL("../app/api/agent/[id]/route.ts", import.meta.url), "utf8");
-  const eventRouteSource = await readFile(new URL("../app/api/agent/[id]/events/route.ts", import.meta.url), "utf8");
-  const autoNameRouteSource = await readFile(new URL("../app/api/sessions/[id]/auto-name/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
+  const startupSource = source.slice(
+    source.indexOf("export async function startRpcSession"),
+  );
+  const routeSource = await readFile(
+    new URL("../app/api/agent/[id]/route.ts", import.meta.url),
+    "utf8",
+  );
+  const eventRouteSource = await readFile(
+    new URL("../app/api/agent/[id]/events/route.ts", import.meta.url),
+    "utf8",
+  );
+  const autoNameRouteSource = await readFile(
+    new URL("../app/api/sessions/[id]/auto-name/route.ts", import.meta.url),
+    "utf8",
+  );
 
-  assert.equal((startupSource.match(/SessionManager\.open\(/g) ?? []).length, 1);
+  assert.equal(
+    (startupSource.match(/SessionManager\.open\(/g) ?? []).length,
+    1,
+  );
   assert.match(startupSource, /const sessionCwd = sessionManager\.getCwd\(\)/);
-  assert.match(startupSource, /projectTrustReloadOptions\(sessionCwd, agentDir\)/);
+  assert.match(
+    startupSource,
+    /projectTrustReloadOptions\(sessionCwd, agentDir\)/,
+  );
   assert.match(startupSource, /cwd: sessionCwd/);
   for (const route of [routeSource, eventRouteSource, autoNameRouteSource]) {
     assert.doesNotMatch(route, /SessionManager\.open\(/);
@@ -120,20 +296,35 @@ test("RPC session startup opens an existing session file only once and trusts it
 });
 
 test("RPC wrapper avoids per-chunk idle maintenance", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
   const startSource = source.slice(
     source.indexOf("  start(): void"),
     source.indexOf("  beginExtensionBinding"),
   );
 
   assert.match(startSource, /IDLE_RESET_EVENT_TYPES\.has\(event\.type\)/);
-  assert.doesNotMatch(startSource, /subscribe\(\(event: AgentEvent\) => \{\s*this\.resetIdleTimer\(\)/);
+  assert.doesNotMatch(
+    startSource,
+    /subscribe\(\(event: AgentEvent\) => \{\s*this\.resetIdleTimer\(\)/,
+  );
 });
 
 test("normal session teardown paths use graceful extension shutdown", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
-  const deleteRouteSource = await readFile(new URL("../app/api/sessions/[id]/route.ts", import.meta.url), "utf8");
-  const trustRouteSource = await readFile(new URL("../app/api/project-trust/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
+  const deleteRouteSource = await readFile(
+    new URL("../app/api/sessions/[id]/route.ts", import.meta.url),
+    "utf8",
+  );
+  const trustRouteSource = await readFile(
+    new URL("../app/api/project-trust/route.ts", import.meta.url),
+    "utf8",
+  );
   const idleSource = source.slice(
     source.indexOf("  private resetIdleTimer"),
     source.indexOf("  private persistBashOnlySession"),
@@ -156,11 +347,17 @@ test("normal session teardown paths use graceful extension shutdown", async () =
   assert.match(forkSource, /shutdownAfterSessionReplacement\("fork"\)/);
   assert.match(cloneSource, /shutdownAfterSessionReplacement\("clone"\)/);
   assert.match(deleteRouteSource, /await getRpcSession\(id\)\?\.shutdown\(\)/);
-  assert.match(trustRouteSource, /await destroyRpcSessionsForCwd\(result\.cwd\)/);
+  assert.match(
+    trustRouteSource,
+    /await destroyRpcSessionsForCwd\(result\.cwd\)/,
+  );
 });
 
 test("clone copies the requested leaf into a child session", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
   const cloneSource = source.slice(
     source.indexOf('case "clone"'),
     source.indexOf('case "navigate_tree"'),
@@ -179,7 +376,11 @@ test("fork_branch copies the selected assistant entry without replacing the sour
   const sessionDir = join(root, "sessions");
   await mkdir(sessionDir);
   const manager = SessionManager.create(root, sessionDir);
-  manager.appendMessage({ role: "user", content: "source prompt", timestamp: Date.now() });
+  manager.appendMessage({
+    role: "user",
+    content: "source prompt",
+    timestamp: Date.now(),
+  });
   manager.appendMessage({
     role: "assistant",
     content: [{ type: "text", text: "selected response" }],
@@ -210,16 +411,26 @@ test("fork_branch copies the selected assistant entry without replacing the sour
     isBashRunning: false,
     extensionRunner: {},
     agent: { state: {} },
-    dispose() { disposed = true; },
+    dispose() {
+      disposed = true;
+    },
   });
 
   try {
-    const result = await wrapper.send({ type: "fork_branch", entryId: selectedEntryId });
+    const result = await wrapper.send({
+      type: "fork_branch",
+      entryId: selectedEntryId,
+    });
     const sessions = await SessionManager.list(root, sessionDir);
-    const forkedInfo = sessions.find((session) => session.id === result.newSessionId);
+    const forkedInfo = sessions.find(
+      (session) => session.id === result.newSessionId,
+    );
     assert.ok(forkedInfo);
     forkedFile = forkedInfo.path;
-    assert.equal(SessionManager.open(forkedFile, sessionDir).getLeafId(), selectedEntryId);
+    assert.equal(
+      SessionManager.open(forkedFile, sessionDir).getLeafId(),
+      selectedEntryId,
+    );
     assert.equal(manager.getLeafId(), selectedEntryId);
     assert.equal(disposed, false);
   } finally {
@@ -236,7 +447,11 @@ test("session replacement rejects active work and clone writes one reopenable ch
   const sessionDir = join(root, "sessions");
   await mkdir(sessionDir);
   const manager = SessionManager.create(root, sessionDir);
-  manager.appendMessage({ role: "user", content: "clone fixture", timestamp: Date.now() });
+  manager.appendMessage({
+    role: "user",
+    content: "clone fixture",
+    timestamp: Date.now(),
+  });
   manager.appendMessage({
     role: "assistant",
     content: [{ type: "text", text: "fixture response" }],
@@ -261,12 +476,20 @@ test("session replacement rejects active work and clone writes one reopenable ch
   let clonedFile;
   let releaseModelRefresh;
   let signalModelRefresh;
-  const modelRefreshStarted = new Promise((resolve) => { signalModelRefresh = resolve; });
-  const modelRefreshHeld = new Promise((resolve) => { releaseModelRefresh = resolve; });
+  const modelRefreshStarted = new Promise((resolve) => {
+    signalModelRefresh = resolve;
+  });
+  const modelRefreshHeld = new Promise((resolve) => {
+    releaseModelRefresh = resolve;
+  });
   let releaseShutdown;
   let signalShutdown;
-  const shutdownStarted = new Promise((resolve) => { signalShutdown = resolve; });
-  const shutdownHeld = new Promise((resolve) => { releaseShutdown = resolve; });
+  const shutdownStarted = new Promise((resolve) => {
+    signalShutdown = resolve;
+  });
+  const shutdownHeld = new Promise((resolve) => {
+    releaseShutdown = resolve;
+  });
   let finishPrompt;
   const wrapper = new AgentSessionWrapper({
     sessionId: manager.getSessionId(),
@@ -275,10 +498,11 @@ test("session replacement rejects active work and clone writes one reopenable ch
     isStreaming: false,
     isCompacting: false,
     isBashRunning: false,
-    prompt: (_message, options) => new Promise((resolve) => {
-      finishPrompt = resolve;
-      options.preflightResult?.(true);
-    }),
+    prompt: (_message, options) =>
+      new Promise((resolve) => {
+        finishPrompt = resolve;
+        options.preflightResult?.(true);
+      }),
     modelRuntime: {
       getModel: () => undefined,
       refresh: async () => {
@@ -298,7 +522,11 @@ test("session replacement rejects active work and clone writes one reopenable ch
   });
 
   try {
-    const modelChange = wrapper.send({ type: "set_model", provider: "test", modelId: "missing" });
+    const modelChange = wrapper.send({
+      type: "set_model",
+      provider: "test",
+      modelId: "missing",
+    });
     await modelRefreshStarted;
     await assert.rejects(
       wrapper.send({ type: "clone" }),
@@ -324,7 +552,9 @@ test("session replacement rejects active work and clone writes one reopenable ch
     );
     let shutdownErrorLog = "";
     const originalConsoleError = console.error;
-    console.error = (...args) => { shutdownErrorLog = args.join(" "); };
+    console.error = (...args) => {
+      shutdownErrorLog = args.join(" ");
+    };
     let result;
     try {
       releaseShutdown();
@@ -332,17 +562,25 @@ test("session replacement rejects active work and clone writes one reopenable ch
     } finally {
       console.error = originalConsoleError;
     }
-    assert.match(shutdownErrorLog, /clone succeeded, but source session shutdown failed/);
+    assert.match(
+      shutdownErrorLog,
+      /clone succeeded, but source session shutdown failed/,
+    );
 
     const sessions = await SessionManager.list(root, sessionDir);
-    const clonedInfo = sessions.find((session) => session.id === result.newSessionId);
+    const clonedInfo = sessions.find(
+      (session) => session.id === result.newSessionId,
+    );
     assert.ok(clonedInfo);
     clonedFile = clonedInfo.path;
 
     const cloned = SessionManager.open(clonedFile, sessionDir);
     assert.equal(cloned.getHeader().parentSession, sourceFile);
     assert.equal(cloned.getLeafId(), cloneLeafId);
-    assert.deepEqual(cloned.buildSessionContext().messages, manager.buildSessionContext().messages);
+    assert.deepEqual(
+      cloned.buildSessionContext().messages,
+      manager.buildSessionContext().messages,
+    );
   } finally {
     wrapper.destroy();
     if (clonedFile) await unlink(clonedFile);
@@ -361,14 +599,18 @@ test("cancelled session replacement releases its lock", async () => {
     isStreaming: false,
     isCompacting: false,
     isBashRunning: false,
-    setAutoRetryEnabled: (enabled) => { autoRetryEnabled = enabled; },
+    setAutoRetryEnabled: (enabled) => {
+      autoRetryEnabled = enabled;
+    },
     extensionRunner: {},
     agent: { state: {} },
     dispose() {},
   });
 
   try {
-    assert.deepEqual(await wrapper.send({ type: "fork", entryId: "missing" }), { cancelled: true });
+    assert.deepEqual(await wrapper.send({ type: "fork", entryId: "missing" }), {
+      cancelled: true,
+    });
     await wrapper.send({ type: "set_auto_retry", enabled: true });
     assert.equal(autoRetryEnabled, true);
   } finally {
@@ -381,7 +623,11 @@ test("clone cancels an assistant-free branch without creating a file", async () 
   const sessionDir = join(root, "sessions");
   await mkdir(sessionDir);
   const manager = SessionManager.create(root, sessionDir);
-  manager.appendMessage({ role: "user", content: "no assistant yet", timestamp: Date.now() });
+  manager.appendMessage({
+    role: "user",
+    content: "no assistant yet",
+    timestamp: Date.now(),
+  });
   const sourceFile = manager.getSessionFile();
   const wrapper = new AgentSessionWrapper({
     sessionId: manager.getSessionId(),
@@ -396,7 +642,9 @@ test("clone cancels an assistant-free branch without creating a file", async () 
   });
 
   try {
-    assert.deepEqual(await wrapper.send({ type: "clone" }), { cancelled: true });
+    assert.deepEqual(await wrapper.send({ type: "clone" }), {
+      cancelled: true,
+    });
     assert.equal((await SessionManager.list(root, sessionDir)).length, 0);
   } finally {
     wrapper.destroy();
@@ -406,7 +654,10 @@ test("clone cancels an assistant-free branch without creating a file", async () 
 });
 
 test("new-session route applies model scope during construction instead of follow-up commands", async () => {
-  const source = await readFile(new URL("../app/api/agent/new/route.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("../app/api/agent/new/route.ts", import.meta.url),
+    "utf8",
+  );
 
   assert.match(source, /initialModel: \{ provider, modelId \}/);
   assert.match(source, /thinkingLevel: explicitThinkingLevel/);
@@ -417,8 +668,14 @@ test("new-session route applies model scope during construction instead of follo
 });
 
 test("prompt routes mark only preflight failures as rejected", async () => {
-  const existingRoute = await readFile(new URL("../app/api/agent/[id]/route.ts", import.meta.url), "utf8");
-  const newRoute = await readFile(new URL("../app/api/agent/new/route.ts", import.meta.url), "utf8");
+  const existingRoute = await readFile(
+    new URL("../app/api/agent/[id]/route.ts", import.meta.url),
+    "utf8",
+  );
+  const newRoute = await readFile(
+    new URL("../app/api/agent/new/route.ts", import.meta.url),
+    "utf8",
+  );
 
   for (const source of [existingRoute, newRoute]) {
     assert.match(source, /let promptAccepted = false/);
@@ -429,26 +686,43 @@ test("prompt routes mark only preflight failures as rejected", async () => {
 });
 
 test("the wrapper reapplies an exact prompt after SDK preflight", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
   const promptSource = source.slice(
     source.indexOf('case "prompt"'),
     source.indexOf('case "abort"'),
   );
 
-  assert.match(promptSource, /preflightResult: \(success\) => \{[\s\S]*?this\.applyExactSystemPrompt\(\);[\s\S]*?acceptPreflight\(\)/);
+  assert.match(
+    promptSource,
+    /preflightResult: \(success\) => \{[\s\S]*?this\.applyExactSystemPrompt\(\);[\s\S]*?acceptPreflight\(\)/,
+  );
   assert.doesNotMatch(promptSource, /requestedToolNames/);
 });
 
 test("RPC session startup persists explicit preferences without replaying setters", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
-  const startupSource = source.slice(source.indexOf("export async function startRpcSession"));
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
+  const startupSource = source.slice(
+    source.indexOf("export async function startRpcSession"),
+  );
 
   assert.match(startupSource, /persistExplicitStartupPreferences\(/);
-  assert.match(startupSource, /modelDefaultChanged\) invalidateModelsCache\(\)/);
+  assert.match(
+    startupSource,
+    /modelDefaultChanged\) invalidateModelsCache\(\)/,
+  );
 });
 
 test("custom extension UI receives the fixed headless terminal facade", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
   const customUiSource = source.slice(
     source.indexOf("private requestExtensionCustomUi"),
     source.indexOf("private requestExtensionUi"),
@@ -459,44 +733,88 @@ test("custom extension UI receives the fixed headless terminal facade", async ()
 });
 
 test("reloading a session invalidates the models cache", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
   const reloadSource = source.slice(
     source.indexOf('case "reload"'),
     source.indexOf('case "abort_compaction"'),
   );
 
   assert.match(reloadSource, /await this\.inner\.reload\(\)/);
-  assert.match(reloadSource, /this\.applyExactSystemPrompt\(\);\s*invalidateModelsCache\(\)/);
+  assert.match(
+    reloadSource,
+    /this\.applyExactSystemPrompt\(\);\s*invalidateModelsCache\(\)/,
+  );
 });
 
 test("normal sessions restore persisted tool selections before loading resources", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
-  const startupSource = source.slice(source.indexOf("export async function startRpcSession"));
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
+  const startupSource = source.slice(
+    source.indexOf("export async function startRpcSession"),
+  );
   const registrationSource = source.slice(
     source.indexOf("function registerRpcWrapper"),
     source.indexOf("const SUBAGENT_CONTROLLER"),
   );
 
-  assert.match(startupSource, /readSessionToolSelection\(\s*sessionManager\.getEntries\(\)/);
-  const selection = /const selectedToolNames =\s*subagentResources\?\.tools \?\? persistedToolNames \?\? requestedToolNames/;
+  assert.match(
+    startupSource,
+    /readSessionToolSelection\(\s*sessionManager\.getEntries\(\)/,
+  );
+  const selection =
+    /const selectedToolNames =\s*subagentResources\?\.tools \?\? persistedToolNames \?\? requestedToolNames/;
   assert.match(startupSource, selection);
-  assert.doesNotMatch(startupSource.match(selection)[0].replace("requestedToolNames", "CODING_TOOL_NAMES"), selection);
-  assert.match(startupSource, /appendSessionToolSelection\(sessionManager, requestedToolNames\)/);
-  assert.ok(startupSource.indexOf("const chatOnly") < startupSource.indexOf("createAgentSessionServices("));
-  assert.match(startupSource, /chatOnly\s*\? CHAT_ONLY_RESOURCE_LOADER_OPTIONS/);
-  assert.match(startupSource, /const trustReloadOptions = subagentResources[\s\S]*?subagentLoadsResources[\s\S]*?projectTrustReloadOptions\(sessionCwd, agentDir\)/);
-  assert.match(registrationSource, /if \(!wrapper\.isChatOnly\(\)\) wrapper\.beginExtensionBinding\(\)/);
+  assert.doesNotMatch(
+    startupSource
+      .match(selection)[0]
+      .replace("requestedToolNames", "CODING_TOOL_NAMES"),
+    selection,
+  );
+  assert.match(
+    startupSource,
+    /appendSessionToolSelection\(sessionManager, requestedToolNames\)/,
+  );
+  assert.ok(
+    startupSource.indexOf("const chatOnly") <
+      startupSource.indexOf("createAgentSessionServices("),
+  );
+  assert.match(
+    startupSource,
+    /chatOnly\s*\? CHAT_ONLY_RESOURCE_LOADER_OPTIONS/,
+  );
+  assert.match(
+    startupSource,
+    /const trustReloadOptions = subagentResources[\s\S]*?subagentLoadsResources[\s\S]*?projectTrustReloadOptions\(sessionCwd, agentDir\)/,
+  );
+  assert.match(
+    registrationSource,
+    /if \(!wrapper\.isChatOnly\(\)\) wrapper\.beginExtensionBinding\(\)/,
+  );
 });
 
 test("crossing the Chat-only boundary persists and rebuilds the wrapper", async () => {
-  const source = await readFile(new URL("./rpc-manager.ts", import.meta.url), "utf8");
+  const source = await readFile(
+    new URL("./rpc-manager.ts", import.meta.url),
+    "utf8",
+  );
   const switchSource = source.slice(
     source.indexOf("export async function setRpcSessionTools"),
     source.indexOf("export function getRunningRpcSessionIds"),
   );
 
-  assert.match(switchSource, /!hasCurrentResourcePolicy\s*\|\|\s*existing\.isChatOnly\(\) !== \(toolNames\.length === 0\)/);
-  assert.match(switchSource, /appendSessionToolSelection\(existing\.inner\.sessionManager, toolNames\)/);
+  assert.match(
+    switchSource,
+    /!hasCurrentResourcePolicy\s*\|\|\s*existing\.isChatOnly\(\) !== \(toolNames\.length === 0\)/,
+  );
+  assert.match(
+    switchSource,
+    /appendSessionToolSelection\(existing\.inner\.sessionManager, toolNames\)/,
+  );
   assert.match(switchSource, /await existing\.shutdown\(\)/);
   assert.match(switchSource, /__recreate__\$\{randomUUID\(\)\}/);
   assert.match(switchSource, /sessionId: started\.realSessionId/);

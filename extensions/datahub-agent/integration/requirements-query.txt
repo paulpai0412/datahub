@@ -1,0 +1,6 @@
+# Host-side metadata query adapter; no packages are installed automatically.
+# Versions present in the local compiler/driver-contract test environment.
+SQLAlchemy==1.4.54
+python-tds==1.17.1
+# Oracle/PostgreSQL/MySQL are optional adapter paths. Do not claim live support
+# until their driver version and actual source are installed/pinned/verified.

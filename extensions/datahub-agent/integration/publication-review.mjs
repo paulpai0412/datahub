@@ -205,32 +205,88 @@ export function validatePublicationReview(review, now) {
     fail("invalid_publication_changes");
   const steward = review.semanticContextJson !== undefined;
   if (steward) {
-    if (review.purpose !== "SEMANTIC" || review.analysisVersion !== stewardVersion || !text(review.semanticContextJson, 80000)) fail("invalid_semantic_review");
+    if (
+      review.purpose !== "SEMANTIC" ||
+      review.analysisVersion !== stewardVersion ||
+      !text(review.semanticContextJson, 80000)
+    )
+      fail("invalid_semantic_review");
     let context;
-    try { context = JSON.parse(review.semanticContextJson); } catch { fail("invalid_semantic_review"); }
-    object(context, ["actor", "createdAt", "request", "preview", "policySha256", "guards"]);
-    if (!text(context.actor, 512) || !Number.isSafeInteger(context.createdAt) || context.createdAt < 0 ||
-        context.createdAt >= review.expiresAt || canonicalPublicationJson(context) !== review.semanticContextJson ||
-        context.request?.sourceUrn !== review.source || context.request?.snapshotDigest !== review.snapshotSha256 ||
-        !["preview", "preview_definition"].includes(context.request?.action) ||
-        !review.datasets.includes(context.request?.datasetUrn)) fail("invalid_semantic_review");
+    try {
+      context = JSON.parse(review.semanticContextJson);
+    } catch {
+      fail("invalid_semantic_review");
+    }
+    object(context, [
+      "actor",
+      "createdAt",
+      "request",
+      "preview",
+      "policySha256",
+      "guards",
+    ]);
+    if (
+      !text(context.actor, 512) ||
+      !Number.isSafeInteger(context.createdAt) ||
+      context.createdAt < 0 ||
+      context.createdAt >= review.expiresAt ||
+      canonicalPublicationJson(context) !== review.semanticContextJson ||
+      context.request?.sourceUrn !== review.source ||
+      context.request?.snapshotDigest !== review.snapshotSha256 ||
+      !["preview", "preview_definition"].includes(context.request?.action) ||
+      !review.datasets.includes(context.request?.datasetUrn)
+    )
+      fail("invalid_semantic_review");
   }
   const seen = new Set();
   for (const change of review.changes) {
-    object(change, ["urn", "aspect", "expectedVersion", "valueJson", "beforeValueJson"]);
+    object(change, [
+      "urn",
+      "aspect",
+      "expectedVersion",
+      "valueJson",
+      "beforeValueJson",
+    ]);
     const entity = /^urn:li:([A-Za-z][A-Za-z0-9]*):.+$/.exec(
       change.urn ?? "",
     )?.[1];
-    const allowed = (steward ? stewardAspects : review.purpose === "LINEAGE" ? structural : semantic)[entity];
+    const allowed = (
+      steward
+        ? stewardAspects
+        : review.purpose === "LINEAGE"
+          ? structural
+          : semantic
+    )[entity];
     if (steward) {
       let before;
-      try { before = JSON.parse(change.beforeValueJson); } catch { fail("invalid_semantic_before_value"); }
-      if (canonicalPublicationJson(before) !== change.beforeValueJson ||
-          (before === null) !== (change.expectedVersion === "-1") ||
-          (before !== null && (typeof before !== "object" || Array.isArray(before)))) fail("invalid_semantic_before_value");
-      if (entity === "schemaField" && !review.datasets.some((urn) => change.urn.startsWith(`urn:li:schemaField:(${urn},`) && change.urn.endsWith(")"))) fail("publication_dataset_outside_scope");
-      if (!["dataset", "schemaField"].includes(entity) && change.expectedVersion !== "-1") fail("semantic_definition_create_only");
-    } else if (change.beforeValueJson !== undefined) fail("invalid_semantic_review");
+      try {
+        before = JSON.parse(change.beforeValueJson);
+      } catch {
+        fail("invalid_semantic_before_value");
+      }
+      if (
+        canonicalPublicationJson(before) !== change.beforeValueJson ||
+        (before === null) !== (change.expectedVersion === "-1") ||
+        (before !== null &&
+          (typeof before !== "object" || Array.isArray(before)))
+      )
+        fail("invalid_semantic_before_value");
+      if (
+        entity === "schemaField" &&
+        !review.datasets.some(
+          (urn) =>
+            change.urn.startsWith(`urn:li:schemaField:(${urn},`) &&
+            change.urn.endsWith(")"),
+        )
+      )
+        fail("publication_dataset_outside_scope");
+      if (
+        !["dataset", "schemaField"].includes(entity) &&
+        change.expectedVersion !== "-1"
+      )
+        fail("semantic_definition_create_only");
+    } else if (change.beforeValueJson !== undefined)
+      fail("invalid_semantic_review");
     if (
       !text(change.urn, 1024) ||
       !allowed?.includes(change.aspect) ||

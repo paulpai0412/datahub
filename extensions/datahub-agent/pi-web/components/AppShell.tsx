@@ -12,6 +12,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useGlobalKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts";
 import { SessionSidebar } from "./SessionSidebar";
 import { ChatWindow } from "./ChatWindow";
+import {
+  CatalogContext,
+  DataHubCatalogDetail,
+  type CatalogSelection,
+} from "./DataHubCatalog";
+import catalogStyles from "./DataHubCatalog.module.css";
+import grafanaStyles from "./DataHubGrafanaPanel.module.css";
+import { GrafanaContext } from "@/lib/grafana-context";
+import {
+  isGrafanaEmbed,
+  type GrafanaEmbed,
+} from "@/lib/grafana-embed-contract";
+import { DataHubGrafanaPanel } from "./DataHubGrafanaPanel";
 import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
@@ -237,6 +250,25 @@ export function AppShell() {
   const sidebarTriggerRef = useRef<HTMLButtonElement>(null);
   const sidebarWasOpen = useRef(false);
   const [rightPanelOpen, setRightPanelOpen] = useState(false);
+  const [grafanaEntry, setGrafanaEntry] = useState<{
+    embed: GrafanaEmbed;
+    session: string;
+    fileTab: string | null;
+  } | null>(null);
+  const [grafanaExpanded, setGrafanaExpanded] = useState(false);
+  const grafanaReturn = useRef({
+    open: false,
+    trigger: null as HTMLElement | null,
+  });
+  const [catalogEntry, setCatalogEntry] = useState<{
+    selection: CatalogSelection;
+    session: string;
+    fileTab: string | null;
+  } | null>(null);
+  const catalogReturn = useRef({
+    open: false,
+    trigger: null as HTMLElement | null,
+  });
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
@@ -2739,9 +2771,124 @@ export function AppShell() {
     );
   };
 
+  const catalogSession = JSON.stringify([
+    selectedSession?.id ?? null,
+    sessionKey,
+  ]);
+  // Scope the displayed payload during render; effect cleanup is too late to
+  // prevent one frame of another session's details.
+  const catalogSelection =
+    catalogEntry?.session === catalogSession &&
+    catalogEntry.fileTab === activeFileTabId &&
+    !settingsSection
+      ? catalogEntry.selection
+      : null;
+  const openCatalog = useCallback(
+    (selection: CatalogSelection | null, restoreFocus = true) => {
+      if (!selection) {
+        if (!catalogSelection) return;
+        setCatalogEntry(null);
+        setRightPanelOpen(catalogReturn.current.open);
+        if (restoreFocus)
+          queueMicrotask(() => {
+            if (catalogReturn.current.trigger?.isConnected)
+              catalogReturn.current.trigger.focus();
+            else chatInputRef.current?.focus();
+          });
+        return;
+      }
+      setGrafanaEntry(null);
+      if (!catalogSelection)
+        catalogReturn.current = {
+          open: rightPanelOpen,
+          trigger:
+            document.activeElement instanceof HTMLElement
+              ? document.activeElement
+              : null,
+        };
+      setCatalogEntry({
+        selection,
+        session: catalogSession,
+        fileTab: activeFileTabId,
+      });
+      setRightPanelOpen(true);
+    },
+    [catalogSelection, catalogSession, activeFileTabId, rightPanelOpen],
+  );
+  const closeCatalog = useCallback(() => openCatalog(null), [openCatalog]);
+  useEffect(() => {
+    if (catalogEntry && catalogEntry.session !== catalogSession) {
+      setCatalogEntry(null);
+      setRightPanelOpen(catalogReturn.current.open);
+    }
+  }, [catalogEntry, catalogSession]);
+  useEffect(() => {
+    setCatalogEntry(null);
+  }, [settingsSection, activeFileTabId]);
+  useEffect(() => {
+    if (!rightPanelOpen) setCatalogEntry(null);
+  }, [rightPanelOpen]);
+
+  const grafanaSelection =
+    rightPanelOpen &&
+    grafanaEntry?.session === catalogSession &&
+    grafanaEntry.fileTab === activeFileTabId &&
+    !settingsSection &&
+    !catalogSelection
+      ? grafanaEntry.embed
+      : null;
+  const openGrafana = useCallback(
+    (embed: GrafanaEmbed) => {
+      if (!isGrafanaEmbed(embed)) return;
+      grafanaReturn.current = {
+        open: rightPanelOpen,
+        trigger:
+          document.activeElement instanceof HTMLElement
+            ? document.activeElement
+            : null,
+      };
+      setCatalogEntry(null);
+      setGrafanaExpanded(false);
+      setGrafanaEntry({
+        embed,
+        session: catalogSession,
+        fileTab: activeFileTabId,
+      });
+      setRightPanelOpen(true);
+    },
+    [catalogSession, activeFileTabId, rightPanelOpen],
+  );
+  const closeGrafana = useCallback(() => {
+    setGrafanaEntry(null);
+    setRightPanelOpen(grafanaReturn.current.open);
+    queueMicrotask(() => {
+      if (grafanaReturn.current.trigger?.isConnected)
+        grafanaReturn.current.trigger.focus();
+      else chatInputRef.current?.focus();
+    });
+  }, []);
+  useEffect(() => {
+    if (
+      grafanaEntry &&
+      (grafanaEntry.session !== catalogSession ||
+        grafanaEntry.fileTab !== activeFileTabId ||
+        settingsSection ||
+        !rightPanelOpen)
+    ) {
+      setGrafanaEntry(null);
+    }
+  }, [
+    grafanaEntry,
+    catalogSession,
+    activeFileTabId,
+    settingsSection,
+    rightPanelOpen,
+  ]);
+
   return (
-    <>
-      <style>{`
+    <GrafanaContext.Provider value={DATAHUB_EMBED ? openGrafana : null}>
+      <CatalogContext.Provider value={DATAHUB_EMBED ? openCatalog : null}>
+        <style>{`
       @keyframes session-info-pop {
         0% {
           opacity: 0;
@@ -2825,895 +2972,698 @@ export function AppShell() {
         }
       }
     `}</style>
-      {DATAHUB_EMBED && (
-        <header className="datahub-header">
-          <h1>Agent</h1>
-          <div>
-            <button
-              type="button"
-              onClick={handleSidebarToggle}
-              aria-controls="session-sidebar"
-              aria-expanded={sidebarOpen}
-            >
-              Workspace
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                setSettingsSection(getLastSettingsSection(projectTrustCwd))
-              }
-            >
-              {translate("common.settings")}
-            </button>
-          </div>
-        </header>
-      )}
-      <div
-        className={DATAHUB_EMBED ? "datahub-workbench" : undefined}
-        style={{
-          display: "flex",
-          width: "100%",
-          height: DATAHUB_EMBED
-            ? "calc(var(--app-viewport-height, 100dvh) - 56px)"
-            : "var(--app-viewport-height, 100dvh)",
-          paddingLeft: "env(safe-area-inset-left)",
-          paddingRight: "env(safe-area-inset-right)",
-          overflow: "hidden",
-          background: "var(--bg)",
-        }}
-      >
-        {/* Mobile overlay backdrop */}
-        <div
-          className={`sidebar-overlay-backdrop${mobileSidebarReady ? "" : " sidebar-mobile-pending"}`}
-          onClick={() => setSidebarOpen(false)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 199,
-            background: "rgba(0,0,0,0.4)",
-            opacity: sidebarOpen ? 1 : 0,
-            pointerEvents: sidebarOpen ? "auto" : "none",
-            transition: "opacity 0.25s ease",
-          }}
-        />
-
-        {/* Left sidebar */}
-        <div
-          ref={sidebarResizer.panelRef}
-          id="session-sidebar"
-          role={DATAHUB_EMBED ? "region" : undefined}
-          aria-label={DATAHUB_EMBED ? "History and Workspace" : undefined}
-          inert={DATAHUB_EMBED && !sidebarOpen ? true : undefined}
-          onKeyDown={(event) => {
-            // Portaled pickers own their keys; do not close them with the drawer.
-            if (
-              DATAHUB_EMBED &&
-              event.key === "Escape" &&
-              !event.defaultPrevented &&
-              event.currentTarget.contains(event.target as Node)
-            ) {
-              event.preventDefault();
-              event.stopPropagation();
-              setSidebarOpen(false);
-            }
-          }}
-          className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}${sidebarResizer.isResizing ? " sidebar-resizing" : ""}`}
-          style={
-            {
-              "--sidebar-width": `${sidebarResizer.width}px`,
-              background: "var(--bg-panel)",
-              borderRight: "1px solid var(--border)",
-              display: "flex",
-              flexDirection: "column",
-              flexShrink: 0,
-              paddingTop: "env(safe-area-inset-top)",
-              paddingBottom: "env(safe-area-inset-bottom)",
-              zIndex: 200,
-            } as React.CSSProperties
-          }
-        >
-          {sidebarContent}
-        </div>
-        {sidebarOpen && (
-          <div
-            {...sidebarResizer.separatorProps}
-            aria-controls="session-sidebar"
-            className={`panel-resize-handle sidebar-resize-handle${sidebarResizer.isResizing ? " is-resizing" : ""}`}
-            data-resize-handle="sidebar"
-            style={DATAHUB_EMBED ? { left: sidebarResizer.width } : undefined}
-            title={`${translate("layout.resizeSidebar")}: ${translate("layout.resizeHint")}`}
-          />
-        )}
-
-        {/* Center: chat */}
-        <div
-          style={{
-            flex: 1,
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-            minWidth: 0,
-          }}
-        >
-          {/* Top bar with sidebar toggle */}
-          <div
-            ref={topBarRef}
-            style={{ flexShrink: 0, background: "var(--bg-panel)" }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                position: "relative",
-                borderBottom: "1px solid var(--border)",
-                height: "calc(36px + env(safe-area-inset-top))",
-                paddingTop: "env(safe-area-inset-top)",
-              }}
-            >
+        {DATAHUB_EMBED && (
+          <header className="datahub-header">
+            <h1>Agent</h1>
+            <div>
               <button
-                ref={sidebarTriggerRef}
-                className={DATAHUB_EMBED ? "datahub-history-toggle" : undefined}
+                type="button"
+                onClick={handleSidebarToggle}
                 aria-controls="session-sidebar"
                 aria-expanded={sidebarOpen}
-                onClick={handleSidebarToggle}
-                title={
-                  sidebarOpen
-                    ? translate("sidebar.hide")
-                    : translate("sidebar.show")
+              >
+                Workspace
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setSettingsSection(getLastSettingsSection(projectTrustCwd))
                 }
-                aria-label={
-                  sidebarOpen
-                    ? translate("sidebar.hide")
-                    : translate("sidebar.show")
-                }
+              >
+                {translate("common.settings")}
+              </button>
+            </div>
+          </header>
+        )}
+        <div
+          className={DATAHUB_EMBED ? "datahub-workbench" : undefined}
+          style={{
+            position: DATAHUB_EMBED ? "relative" : undefined,
+            containerType: DATAHUB_EMBED ? "inline-size" : undefined,
+            display: "flex",
+            width: "100%",
+            height: DATAHUB_EMBED
+              ? "calc(var(--app-viewport-height, 100dvh) - 56px)"
+              : "var(--app-viewport-height, 100dvh)",
+            paddingLeft: "env(safe-area-inset-left)",
+            paddingRight: "env(safe-area-inset-right)",
+            overflow: "hidden",
+            background: "var(--bg)",
+          }}
+        >
+          {/* Mobile overlay backdrop */}
+          <div
+            className={`sidebar-overlay-backdrop${mobileSidebarReady ? "" : " sidebar-mobile-pending"}`}
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 199,
+              background: "rgba(0,0,0,0.4)",
+              opacity: sidebarOpen ? 1 : 0,
+              pointerEvents: sidebarOpen ? "auto" : "none",
+              transition: "opacity 0.25s ease",
+            }}
+          />
+
+          {/* Left sidebar */}
+          <div
+            ref={sidebarResizer.panelRef}
+            id="session-sidebar"
+            role={DATAHUB_EMBED ? "region" : undefined}
+            aria-label={DATAHUB_EMBED ? "History and Workspace" : undefined}
+            inert={DATAHUB_EMBED && !sidebarOpen ? true : undefined}
+            onKeyDown={(event) => {
+              // Portaled pickers own their keys; do not close them with the drawer.
+              if (
+                DATAHUB_EMBED &&
+                event.key === "Escape" &&
+                !event.defaultPrevented &&
+                event.currentTarget.contains(event.target as Node)
+              ) {
+                event.preventDefault();
+                event.stopPropagation();
+                setSidebarOpen(false);
+              }
+            }}
+            className={`sidebar-container${sidebarOpen ? " sidebar-open" : " sidebar-closed"}${mobileSidebarReady ? "" : " sidebar-mobile-pending"}${sidebarResizer.isResizing ? " sidebar-resizing" : ""}`}
+            style={
+              {
+                "--sidebar-width": `${sidebarResizer.width}px`,
+                background: "var(--bg-panel)",
+                borderRight: "1px solid var(--border)",
+                display: "flex",
+                flexDirection: "column",
+                flexShrink: 0,
+                paddingTop: "env(safe-area-inset-top)",
+                paddingBottom: "env(safe-area-inset-bottom)",
+                zIndex: 200,
+              } as React.CSSProperties
+            }
+          >
+            {sidebarContent}
+          </div>
+          {sidebarOpen && (
+            <div
+              {...sidebarResizer.separatorProps}
+              aria-controls="session-sidebar"
+              className={`panel-resize-handle sidebar-resize-handle${sidebarResizer.isResizing ? " is-resizing" : ""}`}
+              data-resize-handle="sidebar"
+              style={DATAHUB_EMBED ? { left: sidebarResizer.width } : undefined}
+              title={`${translate("layout.resizeSidebar")}: ${translate("layout.resizeHint")}`}
+            />
+          )}
+
+          {/* Center: chat */}
+          <div
+            style={{
+              flex: 1,
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+              minWidth: 0,
+            }}
+          >
+            {/* Top bar with sidebar toggle */}
+            <div
+              ref={topBarRef}
+              style={{ flexShrink: 0, background: "var(--bg-panel)" }}
+            >
+              <div
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  width: TOP_BAR_ICON_BUTTON_SIZE,
-                  height: TOP_BAR_ICON_BUTTON_SIZE,
-                  padding: 0,
-                  background: "none",
-                  border: "none",
-                  borderRight: "1px solid var(--border)",
-                  color: "var(--text-muted)",
-                  cursor: "pointer",
-                  flexShrink: 0,
-                  transition: "color 0.12s",
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.color = "var(--text)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.color = "var(--text-muted)";
+                  position: "relative",
+                  borderBottom: "1px solid var(--border)",
+                  height: "calc(36px + env(safe-area-inset-top))",
+                  paddingTop: "env(safe-area-inset-top)",
                 }}
               >
-                {DATAHUB_EMBED ? (
-                  "History"
-                ) : sidebarOpen ? (
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="2" />
-                    <line x1="9" y1="3" x2="9" y2="21" />
-                  </svg>
-                ) : (
-                  <svg
-                    width="18"
-                    height="18"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  >
-                    <line x1="3" y1="6" x2="21" y2="6" />
-                    <line x1="3" y1="12" x2="21" y2="12" />
-                    <line x1="3" y1="18" x2="21" y2="18" />
-                  </svg>
-                )}
-              </button>
-              {isMobile && (
-                <div
-                  ref={mobileToolbarRef}
-                  data-mobile-toolbar="true"
+                <button
+                  ref={sidebarTriggerRef}
+                  className={
+                    DATAHUB_EMBED ? "datahub-history-toggle" : undefined
+                  }
+                  aria-controls="session-sidebar"
+                  aria-expanded={sidebarOpen}
+                  onClick={handleSidebarToggle}
+                  title={
+                    sidebarOpen
+                      ? translate("sidebar.hide")
+                      : translate("sidebar.show")
+                  }
+                  aria-label={
+                    sidebarOpen
+                      ? translate("sidebar.hide")
+                      : translate("sidebar.show")
+                  }
                   style={{
-                    position: "relative",
                     display: "flex",
-                    alignItems: "stretch",
-                    flex: 1,
-                    minWidth: 0,
-                    height: "100%",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: TOP_BAR_ICON_BUTTON_SIZE,
+                    height: TOP_BAR_ICON_BUTTON_SIZE,
+                    padding: 0,
+                    background: "none",
+                    border: "none",
+                    borderRight: "1px solid var(--border)",
+                    color: "var(--text-muted)",
+                    cursor: "pointer",
+                    flexShrink: 0,
+                    transition: "color 0.12s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = "var(--text)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = "var(--text-muted)";
                   }}
                 >
-                  {isNarrowMobile && (
-                    <button
-                      type="button"
-                      onClick={handleMobileToolbarMoreToggle}
-                      title={
-                        mobileToolbarMoreOpen
-                          ? translate("chat.close")
-                          : translate("chat.moreControls")
-                      }
-                      aria-label={
-                        mobileToolbarMoreOpen
-                          ? translate("chat.close")
-                          : translate("chat.moreControls")
-                      }
-                      aria-controls="mobile-toolbar-actions"
-                      aria-expanded={mobileToolbarMoreOpen}
-                      data-mobile-toolbar-more="true"
-                      style={{
-                        position: "relative",
-                        zIndex: mobileToolbarMoreOpen ? 21 : undefined,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: TOP_BAR_ICON_BUTTON_SIZE,
-                        height: TOP_BAR_ICON_BUTTON_SIZE,
-                        padding: 0,
-                        background: mobileToolbarMoreOpen
-                          ? "var(--bg-selected)"
-                          : "none",
-                        border: "none",
-                        borderRight: "1px solid var(--border)",
-                        color: mobileToolbarMoreOpen
-                          ? "var(--text)"
-                          : "var(--text-muted)",
-                        cursor: "pointer",
-                        flexShrink: 0,
-                        transition: "color 0.12s, background 0.12s",
-                      }}
+                  {DATAHUB_EMBED ? (
+                    "History"
+                  ) : sidebarOpen ? (
+                    <svg
+                      width="16"
+                      height="16"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     >
-                      {mobileToolbarMoreOpen ? (
-                        <svg
-                          width="15"
-                          height="15"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          aria-hidden="true"
-                        >
-                          <line x1="5" y1="5" x2="19" y2="19" />
-                          <line x1="19" y1="5" x2="5" y2="19" />
-                        </svg>
-                      ) : (
-                        <svg
-                          width="17"
-                          height="17"
-                          viewBox="0 0 24 24"
-                          fill="currentColor"
-                          aria-hidden="true"
-                        >
-                          <circle cx="5" cy="12" r="1.5" />
-                          <circle cx="12" cy="12" r="1.5" />
-                          <circle cx="19" cy="12" r="1.5" />
-                        </svg>
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <line x1="9" y1="3" x2="9" y2="21" />
+                    </svg>
+                  ) : (
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    >
+                      <line x1="3" y1="6" x2="21" y2="6" />
+                      <line x1="3" y1="12" x2="21" y2="12" />
+                      <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                  )}
+                </button>
+                {isMobile && (
+                  <div
+                    ref={mobileToolbarRef}
+                    data-mobile-toolbar="true"
+                    style={{
+                      position: "relative",
+                      display: "flex",
+                      alignItems: "stretch",
+                      flex: 1,
+                      minWidth: 0,
+                      height: "100%",
+                    }}
+                  >
+                    {isNarrowMobile && (
+                      <button
+                        type="button"
+                        onClick={handleMobileToolbarMoreToggle}
+                        title={
+                          mobileToolbarMoreOpen
+                            ? translate("chat.close")
+                            : translate("chat.moreControls")
+                        }
+                        aria-label={
+                          mobileToolbarMoreOpen
+                            ? translate("chat.close")
+                            : translate("chat.moreControls")
+                        }
+                        aria-controls="mobile-toolbar-actions"
+                        aria-expanded={mobileToolbarMoreOpen}
+                        data-mobile-toolbar-more="true"
+                        style={{
+                          position: "relative",
+                          zIndex: mobileToolbarMoreOpen ? 21 : undefined,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          width: TOP_BAR_ICON_BUTTON_SIZE,
+                          height: TOP_BAR_ICON_BUTTON_SIZE,
+                          padding: 0,
+                          background: mobileToolbarMoreOpen
+                            ? "var(--bg-selected)"
+                            : "none",
+                          border: "none",
+                          borderRight: "1px solid var(--border)",
+                          color: mobileToolbarMoreOpen
+                            ? "var(--text)"
+                            : "var(--text-muted)",
+                          cursor: "pointer",
+                          flexShrink: 0,
+                          transition: "color 0.12s, background 0.12s",
+                        }}
+                      >
+                        {mobileToolbarMoreOpen ? (
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            aria-hidden="true"
+                          >
+                            <line x1="5" y1="5" x2="19" y2="19" />
+                            <line x1="19" y1="5" x2="5" y2="19" />
+                          </svg>
+                        ) : (
+                          <svg
+                            width="17"
+                            height="17"
+                            viewBox="0 0 24 24"
+                            fill="currentColor"
+                            aria-hidden="true"
+                          >
+                            <circle cx="5" cy="12" r="1.5" />
+                            <circle cx="12" cy="12" r="1.5" />
+                            <circle cx="19" cy="12" r="1.5" />
+                          </svg>
+                        )}
+                      </button>
+                    )}
+                    {!isNarrowMobile && renderChatToolbarActions(true)}
+                    {renderSessionStatsButton(true)}
+                    {renderMainFileToggle(true)}
+                    {isNarrowMobile && mobileToolbarMoreOpen && (
+                      <div
+                        id="mobile-toolbar-actions"
+                        role="toolbar"
+                        aria-label={translate("chat.moreControls")}
+                        data-mobile-toolbar-actions="true"
+                        style={{
+                          position: "absolute",
+                          top: 0,
+                          right: 0,
+                          bottom: 0,
+                          left: TOP_BAR_ICON_BUTTON_SIZE,
+                          zIndex: 20,
+                          display: "flex",
+                          alignItems: "stretch",
+                          background:
+                            "color-mix(in srgb, var(--bg-panel) 94%, var(--bg))",
+                          boxShadow: "4px 0 18px rgba(0,0,0,0.12)",
+                          backdropFilter: "blur(10px)",
+                        }}
+                      >
+                        {renderChatToolbarActions(true)}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!isMobile && (
+                  <>
+                    {renderThemeButton(false)}
+                    {renderLanguageButton(false)}
+                    {renderProjectTrustWarning(false)}
+                    {renderChatToolbarActions(false)}
+                    {renderSessionStatsButton(false)}
+                  </>
+                )}
+                {!isMobile && renderMainFileToggle(false)}
+                {isMobile && sessionHasBranches && (
+                  <BranchNavigator
+                    tree={branchTree}
+                    activeLeafId={branchActiveLeafId}
+                    onLeafChange={handleBranchLeafChange}
+                    inline
+                    compact
+                    containerRef={topBarRef}
+                    open={activeTopPanel === "branches"}
+                    onToggle={() => toggleTopPanel("branches")}
+                    hasSession={showChat}
+                    hideInlineButton
+                  />
+                )}
+                {/* Top panel dropdown — shared, only one active at a time */}
+                {activeTopPanel && topPanelPos && (
+                  <div
+                    style={{
+                      position: "fixed",
+                      top: topPanelPos.top,
+                      left: topPanelPos.left,
+                      width: topPanelPos.width,
+                      maxHeight: `calc(100dvh - ${topPanelPos.top}px)`,
+                      overflowY: "auto",
+                      zIndex: 500,
+                    }}
+                  >
+                    {activeTopPanel === "language" && (
+                      <div
+                        ref={selectionMenuRef}
+                        role="menu"
+                        aria-label={translate("common.language")}
+                        style={{
+                          background: "var(--bg-panel)",
+                          borderLeft: "1px solid var(--border)",
+                          borderRight: "1px solid var(--border)",
+                          borderBottom: "1px solid var(--border)",
+                          overflow: "hidden",
+                          padding: 4,
+                        }}
+                      >
+                        {supportedLocales.map((plugin) => (
+                          <button
+                            key={plugin.id}
+                            type="button"
+                            onClick={() => {
+                              setLocale(plugin.id as typeof locale);
+                              languageBtnRef.current?.focus();
+                              setActiveTopPanel(null);
+                            }}
+                            role="menuitemradio"
+                            aria-checked={locale === plugin.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              width: "100%",
+                              height: 34,
+                              padding: "0 10px",
+                              border: "none",
+                              borderRadius: 4,
+                              background:
+                                locale === plugin.id
+                                  ? "var(--bg-selected)"
+                                  : "transparent",
+                              color: "var(--text)",
+                              cursor: "pointer",
+                              textAlign: "left",
+                              fontSize: 12,
+                              transition: "background 0.1s",
+                            }}
+                            onMouseEnter={(e) => {
+                              if (locale !== plugin.id)
+                                e.currentTarget.style.background =
+                                  "var(--bg-hover)";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (locale !== plugin.id)
+                                e.currentTarget.style.background =
+                                  "transparent";
+                            }}
+                          >
+                            <span>{plugin.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {activeTopPanel === "theme" && (
+                      <div
+                        ref={selectionMenuRef}
+                        role="menu"
+                        aria-label={translate("settings.appearance")}
+                        style={{
+                          background: "var(--bg-panel)",
+                          borderLeft: "1px solid var(--border)",
+                          borderRight: "1px solid var(--border)",
+                          borderBottom: "1px solid var(--border)",
+                          overflow: "hidden",
+                          padding: 4,
+                        }}
+                      >
+                        {THEME_OPTIONS.map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => {
+                              setThemePreference(option.id);
+                              themeBtnRef.current?.focus();
+                              setActiveTopPanel(null);
+                            }}
+                            role="menuitemradio"
+                            aria-checked={preference === option.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 8,
+                              width: "100%",
+                              minHeight: 34,
+                              padding: "0 10px",
+                              border: "none",
+                              borderRadius: 4,
+                              background:
+                                preference === option.id
+                                  ? "var(--bg-selected)"
+                                  : "transparent",
+                              color: "var(--text)",
+                              cursor: "pointer",
+                              textAlign: "left",
+                              fontSize: 12,
+                              transition: "background 0.1s",
+                            }}
+                            onMouseEnter={(event) => {
+                              if (preference !== option.id)
+                                event.currentTarget.style.background =
+                                  "var(--bg-hover)";
+                            }}
+                            onMouseLeave={(event) => {
+                              if (preference !== option.id)
+                                event.currentTarget.style.background =
+                                  "transparent";
+                            }}
+                          >
+                            <ThemeIcon preference={option.id} size={16} />
+                            <span>{translate(option.label)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {activeTopPanel === "agents" &&
+                      activeSessionFamily &&
+                      selectedSession && (
+                        <AgentSessionPanel
+                          rootSession={activeSessionFamily.root}
+                          subagents={activeSessionFamily.subagents}
+                          selectedSessionId={selectedSession.id}
+                          runningSessionIds={runningSessionIds}
+                          onSelectSession={handleSelectSession}
+                        />
                       )}
-                    </button>
-                  )}
-                  {!isNarrowMobile && renderChatToolbarActions(true)}
-                  {renderSessionStatsButton(true)}
-                  {renderMainFileToggle(true)}
-                  {isNarrowMobile && mobileToolbarMoreOpen && (
-                    <div
-                      id="mobile-toolbar-actions"
-                      role="toolbar"
-                      aria-label={translate("chat.moreControls")}
-                      data-mobile-toolbar-actions="true"
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        right: 0,
-                        bottom: 0,
-                        left: TOP_BAR_ICON_BUTTON_SIZE,
-                        zIndex: 20,
-                        display: "flex",
-                        alignItems: "stretch",
-                        background:
-                          "color-mix(in srgb, var(--bg-panel) 94%, var(--bg))",
-                        boxShadow: "4px 0 18px rgba(0,0,0,0.12)",
-                        backdropFilter: "blur(10px)",
-                      }}
-                    >
-                      {renderChatToolbarActions(true)}
-                    </div>
-                  )}
-                </div>
-              )}
-              {!isMobile && (
-                <>
-                  {renderThemeButton(false)}
-                  {renderLanguageButton(false)}
-                  {renderProjectTrustWarning(false)}
-                  {renderChatToolbarActions(false)}
-                  {renderSessionStatsButton(false)}
-                </>
-              )}
-              {!isMobile && renderMainFileToggle(false)}
-              {isMobile && sessionHasBranches && (
-                <BranchNavigator
-                  tree={branchTree}
-                  activeLeafId={branchActiveLeafId}
-                  onLeafChange={handleBranchLeafChange}
-                  inline
-                  compact
-                  containerRef={topBarRef}
-                  open={activeTopPanel === "branches"}
-                  onToggle={() => toggleTopPanel("branches")}
-                  hasSession={showChat}
-                  hideInlineButton
-                />
-              )}
-              {/* Top panel dropdown — shared, only one active at a time */}
-              {activeTopPanel && topPanelPos && (
-                <div
-                  style={{
-                    position: "fixed",
-                    top: topPanelPos.top,
-                    left: topPanelPos.left,
-                    width: topPanelPos.width,
-                    maxHeight: `calc(100dvh - ${topPanelPos.top}px)`,
-                    overflowY: "auto",
-                    zIndex: 500,
-                  }}
-                >
-                  {activeTopPanel === "language" && (
-                    <div
-                      ref={selectionMenuRef}
-                      role="menu"
-                      aria-label={translate("common.language")}
-                      style={{
-                        background: "var(--bg-panel)",
-                        borderLeft: "1px solid var(--border)",
-                        borderRight: "1px solid var(--border)",
-                        borderBottom: "1px solid var(--border)",
-                        overflow: "hidden",
-                        padding: 4,
-                      }}
-                    >
-                      {supportedLocales.map((plugin) => (
-                        <button
-                          key={plugin.id}
-                          type="button"
-                          onClick={() => {
-                            setLocale(plugin.id as typeof locale);
-                            languageBtnRef.current?.focus();
-                            setActiveTopPanel(null);
-                          }}
-                          role="menuitemradio"
-                          aria-checked={locale === plugin.id}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            width: "100%",
-                            height: 34,
-                            padding: "0 10px",
-                            border: "none",
-                            borderRadius: 4,
-                            background:
-                              locale === plugin.id
-                                ? "var(--bg-selected)"
-                                : "transparent",
-                            color: "var(--text)",
-                            cursor: "pointer",
-                            textAlign: "left",
-                            fontSize: 12,
-                            transition: "background 0.1s",
-                          }}
-                          onMouseEnter={(e) => {
-                            if (locale !== plugin.id)
-                              e.currentTarget.style.background =
-                                "var(--bg-hover)";
-                          }}
-                          onMouseLeave={(e) => {
-                            if (locale !== plugin.id)
-                              e.currentTarget.style.background = "transparent";
-                          }}
-                        >
-                          <span>{plugin.label}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {activeTopPanel === "theme" && (
-                    <div
-                      ref={selectionMenuRef}
-                      role="menu"
-                      aria-label={translate("settings.appearance")}
-                      style={{
-                        background: "var(--bg-panel)",
-                        borderLeft: "1px solid var(--border)",
-                        borderRight: "1px solid var(--border)",
-                        borderBottom: "1px solid var(--border)",
-                        overflow: "hidden",
-                        padding: 4,
-                      }}
-                    >
-                      {THEME_OPTIONS.map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => {
-                            setThemePreference(option.id);
-                            themeBtnRef.current?.focus();
-                            setActiveTopPanel(null);
-                          }}
-                          role="menuitemradio"
-                          aria-checked={preference === option.id}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            width: "100%",
-                            minHeight: 34,
-                            padding: "0 10px",
-                            border: "none",
-                            borderRadius: 4,
-                            background:
-                              preference === option.id
-                                ? "var(--bg-selected)"
-                                : "transparent",
-                            color: "var(--text)",
-                            cursor: "pointer",
-                            textAlign: "left",
-                            fontSize: 12,
-                            transition: "background 0.1s",
-                          }}
-                          onMouseEnter={(event) => {
-                            if (preference !== option.id)
-                              event.currentTarget.style.background =
-                                "var(--bg-hover)";
-                          }}
-                          onMouseLeave={(event) => {
-                            if (preference !== option.id)
-                              event.currentTarget.style.background =
-                                "transparent";
-                          }}
-                        >
-                          <ThemeIcon preference={option.id} size={16} />
-                          <span>{translate(option.label)}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                  {activeTopPanel === "agents" &&
-                    activeSessionFamily &&
-                    selectedSession && (
-                      <AgentSessionPanel
-                        rootSession={activeSessionFamily.root}
-                        subagents={activeSessionFamily.subagents}
-                        selectedSessionId={selectedSession.id}
-                        runningSessionIds={runningSessionIds}
-                        onSelectSession={handleSelectSession}
+                    {activeTopPanel === "system" && (
+                      <SystemPromptPanel
+                        loading={systemInfoLoading}
+                        prompt={systemPrompt}
+                        translate={translate}
                       />
                     )}
-                  {activeTopPanel === "system" && (
-                    <SystemPromptPanel
-                      loading={systemInfoLoading}
-                      prompt={systemPrompt}
-                      translate={translate}
-                    />
-                  )}
-                  {activeTopPanel === "tools" && (
-                    <ToolDefinitionsPanel
-                      loading={systemInfoLoading}
-                      tools={systemTools}
-                      translate={translate}
-                    />
-                  )}
-                  {activeTopPanel === "session" && (
-                    <div
-                      className="session-info-popover"
-                      style={{
-                        background: "var(--bg-panel)",
-                        borderBottom: "1px solid var(--border)",
-                        boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
-                        padding: "12px 16px",
-                      }}
-                    >
-                      {sessionStats ? (
-                        (() => {
-                          const formatDuration = (ms: number) => {
-                            if (ms <= 0) return "0s";
-                            const totalSec = Math.floor(ms / 1000);
-                            const h = Math.floor(totalSec / 3600);
-                            const m = Math.floor((totalSec % 3600) / 60);
-                            const s = totalSec % 60;
-                            if (h > 0) return `${h}h ${m}m`;
-                            if (m > 0) return `${m}m ${s}s`;
-                            return `${s}s`;
-                          };
-                          const totalActiveMs = sessionStats.totalActiveMs ?? 0;
-                          const ws = selectedSession;
-                          const sessionRows = [
-                            ...(sessionStats.sessionName
-                              ? [
-                                  {
-                                    label: translate("session.name"),
-                                    value: sessionStats.sessionName,
-                                    copyField: null,
-                                  },
-                                ]
-                              : []),
-                            {
-                              label: translate("session.file"),
-                              value:
-                                sessionStats.sessionFile ??
-                                translate("session.inMemory"),
-                              copyField: "file" as const,
-                            },
-                            {
-                              label: translate("session.id"),
-                              value: sessionStats.sessionId,
-                              copyField: "id" as const,
-                            },
-                            ...(totalActiveMs > 0
-                              ? [
-                                  {
-                                    label: translate("session.totalActive"),
-                                    value: formatDuration(totalActiveMs),
-                                    copyField: null,
-                                  },
-                                ]
-                              : []),
-                          ];
-                          const projectRows = [
-                            ...(ws
-                              ? [
-                                  {
-                                    label: translate("session.projectDir"),
-                                    value: ws.projectRoot ?? ws.cwd,
-                                    copyField: "projectDir" as const,
-                                  },
-                                ]
-                              : []),
-                            ...(ws?.branch
-                              ? [
-                                  {
-                                    label: translate("session.gitBranch"),
-                                    value: ws.branch,
-                                    copyField: "gitBranch" as const,
-                                  },
-                                ]
-                              : []),
-                            ...(ws?.isWorktree
-                              ? [
-                                  {
-                                    label: translate("session.gitWorktree"),
-                                    value: ws.cwd,
-                                    copyField: "gitWorktree" as const,
-                                  },
-                                ]
-                              : []),
-                          ];
-                          const messageRows = [
-                            [
-                              translate("session.user"),
-                              sessionStats.userMessages.toLocaleString(locale),
-                            ],
-                            [
-                              translate("session.assistant"),
-                              sessionStats.assistantMessages.toLocaleString(
-                                locale,
-                              ),
-                            ],
-                            [
-                              translate("session.toolCalls"),
-                              sessionStats.toolCalls.toLocaleString(locale),
-                            ],
-                            [
-                              translate("session.toolResults"),
-                              sessionStats.toolResults.toLocaleString(locale),
-                            ],
-                            [
-                              translate("session.total"),
-                              sessionStats.totalMessages.toLocaleString(locale),
-                            ],
-                          ];
-                          const tokenRows = [
-                            [
-                              translate("session.input"),
-                              sessionStats.tokens.input.toLocaleString(locale),
-                            ],
-                            [
-                              translate("session.output"),
-                              sessionStats.tokens.output.toLocaleString(locale),
-                            ],
-                            ...(sessionStats.tokens.cacheRead > 0
-                              ? [
-                                  [
-                                    translate("session.cacheRead"),
-                                    sessionStats.tokens.cacheRead.toLocaleString(
-                                      locale,
-                                    ),
-                                  ],
-                                ]
-                              : []),
-                            ...(sessionStats.tokens.cacheWrite > 0
-                              ? [
-                                  [
-                                    translate("session.cacheWrite"),
-                                    sessionStats.tokens.cacheWrite.toLocaleString(
-                                      locale,
-                                    ),
-                                  ],
-                                ]
-                              : []),
-                            [
-                              translate("session.total"),
-                              sessionStats.tokens.total.toLocaleString(locale),
-                            ],
-                          ];
-                          const ctx = contextUsage ?? sessionStats.contextUsage;
-                          const formatCompact = (n: number) =>
-                            n >= 1_000_000
-                              ? `${(n / 1_000_000).toFixed(1)}M`
-                              : n >= 1000
-                                ? `${(n / 1000).toFixed(0)}k`
-                                : String(n);
-                          const extraTokenRows = [
-                            ...(sessionStats.cost > 0
-                              ? [
-                                  [
-                                    translate("session.cost"),
-                                    `$${sessionStats.cost.toFixed(4)}`,
-                                  ],
-                                ]
-                              : []),
-                            ...(ctx?.contextWindow
-                              ? [
-                                  [
-                                    translate("session.context"),
-                                    `${ctx.percent !== null ? `${ctx.percent.toFixed(1)}%` : "?"} / ${formatCompact(ctx.contextWindow)}`,
-                                  ],
-                                ]
-                              : []),
-                            // Cache hit rate = cache reads / (input + cache writes + cache reads) — the denominator covers all input-class tokens.
-                            ...(sessionStats.tokens.cacheRead +
-                              sessionStats.tokens.cacheWrite >
-                              0 &&
-                            sessionStats.tokens.cacheRead +
-                              sessionStats.tokens.cacheWrite +
-                              sessionStats.tokens.input >
-                              0
-                              ? [
-                                  [
-                                    translate("session.cacheHitRate"),
-                                    `${((sessionStats.tokens.cacheRead / (sessionStats.tokens.cacheRead + sessionStats.tokens.cacheWrite + sessionStats.tokens.input)) * 100).toFixed(1)}%`,
-                                  ],
-                                ]
-                              : []),
-                          ];
-                          const section = (
-                            title: string,
-                            sectionRows: string[][],
-                            valueAlign: "left" | "right" = "left",
-                            compact = false,
-                          ) => (
-                            <div style={{ minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  color: "var(--text)",
-                                  marginBottom: 6,
-                                }}
-                              >
-                                {title}
-                              </div>
-                              <div
-                                style={{
-                                  display: "grid",
-                                  gridTemplateColumns: compact
-                                    ? "max-content max-content"
-                                    : "auto minmax(0, 1fr)",
-                                  columnGap: compact ? 14 : 12,
-                                  rowGap: 4,
-                                  justifyContent: compact ? "start" : undefined,
-                                }}
-                              >
-                                {sectionRows.map(([label, value]) => (
-                                  <div
-                                    key={`${title}:${label}`}
-                                    style={{ display: "contents" }}
-                                  >
-                                    <div
-                                      style={{
-                                        color: "var(--text-dim)",
-                                        whiteSpace: "nowrap",
-                                      }}
-                                    >
-                                      {label}
-                                    </div>
-                                    <div
-                                      style={{
-                                        color: "var(--text-muted)",
-                                        minWidth: 0,
-                                        overflowWrap: compact
-                                          ? "normal"
-                                          : "anywhere",
-                                        textAlign: valueAlign,
-                                        whiteSpace:
-                                          valueAlign === "right"
-                                            ? "nowrap"
-                                            : "normal",
-                                      }}
-                                    >
-                                      {value}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                          const copyTitleKey: Record<SessionCopyField, string> =
-                            {
-                              file: "session.copyFile",
-                              id: "session.copyId",
-                              projectDir: "session.copyProjectDir",
-                              gitBranch: "session.copyGitBranch",
-                              gitWorktree: "session.copyGitWorktree",
+                    {activeTopPanel === "tools" && (
+                      <ToolDefinitionsPanel
+                        loading={systemInfoLoading}
+                        tools={systemTools}
+                        translate={translate}
+                      />
+                    )}
+                    {activeTopPanel === "session" && (
+                      <div
+                        className="session-info-popover"
+                        style={{
+                          background: "var(--bg-panel)",
+                          borderBottom: "1px solid var(--border)",
+                          boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+                          padding: "12px 16px",
+                        }}
+                      >
+                        {sessionStats ? (
+                          (() => {
+                            const formatDuration = (ms: number) => {
+                              if (ms <= 0) return "0s";
+                              const totalSec = Math.floor(ms / 1000);
+                              const h = Math.floor(totalSec / 3600);
+                              const m = Math.floor((totalSec % 3600) / 60);
+                              const s = totalSec % 60;
+                              if (h > 0) return `${h}h ${m}m`;
+                              if (m > 0) return `${m}m ${s}s`;
+                              return `${s}s`;
                             };
-                          const copyButton = (
-                            field: SessionCopyField,
-                            value: string,
-                          ) => {
-                            const copied = copiedSessionField === field;
-                            return (
-                              <button
-                                type="button"
-                                title={
-                                  copied
-                                    ? translate("session.copied")
-                                    : translate(copyTitleKey[field])
-                                }
-                                onClick={() =>
-                                  handleCopySessionField(field, value)
-                                }
-                                style={{
-                                  alignSelf: "start",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  width: 22,
-                                  height: 22,
-                                  marginTop: -2,
-                                  color: copied
-                                    ? "var(--accent)"
-                                    : "var(--text-dim)",
-                                  background: "transparent",
-                                  border: "1px solid var(--border)",
-                                  borderRadius: 4,
-                                  cursor: "pointer",
-                                  flex: "0 0 auto",
-                                  transition:
-                                    "color 0.12s, border-color 0.12s, background 0.12s",
-                                }}
-                                onMouseEnter={(e) => {
-                                  e.currentTarget.style.color = "var(--accent)";
-                                  e.currentTarget.style.borderColor =
-                                    "var(--accent)";
-                                  e.currentTarget.style.background =
-                                    "var(--bg-hover)";
-                                }}
-                                onMouseLeave={(e) => {
-                                  e.currentTarget.style.color = copied
-                                    ? "var(--accent)"
-                                    : "var(--text-dim)";
-                                  e.currentTarget.style.borderColor =
-                                    "var(--border)";
-                                  e.currentTarget.style.background =
-                                    "transparent";
-                                }}
-                              >
-                                {copied ? (
-                                  <svg
-                                    width="12"
-                                    height="12"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    aria-hidden="true"
-                                  >
-                                    <polyline points="20 6 9 17 4 12" />
-                                  </svg>
-                                ) : (
-                                  <svg
-                                    width="12"
-                                    height="12"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    strokeWidth="2"
-                                    strokeLinecap="round"
-                                    strokeLinejoin="round"
-                                    aria-hidden="true"
-                                  >
-                                    <rect
-                                      x="9"
-                                      y="9"
-                                      width="13"
-                                      height="13"
-                                      rx="2"
-                                      ry="2"
-                                    />
-                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                                  </svg>
-                                )}
-                              </button>
-                            );
-                          };
-                          const sessionInfoSection = (
-                            <div style={{ minWidth: 0 }}>
-                              <div
-                                style={{
-                                  fontSize: 11,
-                                  fontWeight: 700,
-                                  color: "var(--text)",
-                                  marginBottom: 6,
-                                }}
-                              >
-                                {translate("session.infoSection")}
-                              </div>
-                              <div
-                                style={{
-                                  display: "grid",
-                                  gridTemplateColumns:
-                                    "auto minmax(0, 1fr) auto",
-                                  columnGap: 12,
-                                  rowGap: 8,
-                                  alignItems: "start",
-                                }}
-                              >
-                                {sessionRows.map((row) => (
-                                  <div
-                                    key={`session-info:${row.label}`}
-                                    style={{ display: "contents" }}
-                                  >
-                                    <div
-                                      style={{
-                                        color: "var(--text-dim)",
-                                        whiteSpace: "nowrap",
-                                      }}
-                                    >
-                                      {row.label}
-                                    </div>
-                                    <div
-                                      style={{
-                                        color: "var(--text-muted)",
-                                        minWidth: 0,
-                                        overflowWrap: "anywhere",
-                                        wordBreak: "break-word",
-                                        whiteSpace: "normal",
-                                      }}
-                                    >
-                                      {row.value}
-                                    </div>
-                                    <div>
-                                      {row.copyField
-                                        ? copyButton(row.copyField, row.value)
-                                        : null}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                          const projectInfoSection =
-                            projectRows.length > 0 ? (
+                            const totalActiveMs =
+                              sessionStats.totalActiveMs ?? 0;
+                            const ws = selectedSession;
+                            const sessionRows = [
+                              ...(sessionStats.sessionName
+                                ? [
+                                    {
+                                      label: translate("session.name"),
+                                      value: sessionStats.sessionName,
+                                      copyField: null,
+                                    },
+                                  ]
+                                : []),
+                              {
+                                label: translate("session.file"),
+                                value:
+                                  sessionStats.sessionFile ??
+                                  translate("session.inMemory"),
+                                copyField: "file" as const,
+                              },
+                              {
+                                label: translate("session.id"),
+                                value: sessionStats.sessionId,
+                                copyField: "id" as const,
+                              },
+                              ...(totalActiveMs > 0
+                                ? [
+                                    {
+                                      label: translate("session.totalActive"),
+                                      value: formatDuration(totalActiveMs),
+                                      copyField: null,
+                                    },
+                                  ]
+                                : []),
+                            ];
+                            const projectRows = [
+                              ...(ws
+                                ? [
+                                    {
+                                      label: translate("session.projectDir"),
+                                      value: ws.projectRoot ?? ws.cwd,
+                                      copyField: "projectDir" as const,
+                                    },
+                                  ]
+                                : []),
+                              ...(ws?.branch
+                                ? [
+                                    {
+                                      label: translate("session.gitBranch"),
+                                      value: ws.branch,
+                                      copyField: "gitBranch" as const,
+                                    },
+                                  ]
+                                : []),
+                              ...(ws?.isWorktree
+                                ? [
+                                    {
+                                      label: translate("session.gitWorktree"),
+                                      value: ws.cwd,
+                                      copyField: "gitWorktree" as const,
+                                    },
+                                  ]
+                                : []),
+                            ];
+                            const messageRows = [
+                              [
+                                translate("session.user"),
+                                sessionStats.userMessages.toLocaleString(
+                                  locale,
+                                ),
+                              ],
+                              [
+                                translate("session.assistant"),
+                                sessionStats.assistantMessages.toLocaleString(
+                                  locale,
+                                ),
+                              ],
+                              [
+                                translate("session.toolCalls"),
+                                sessionStats.toolCalls.toLocaleString(locale),
+                              ],
+                              [
+                                translate("session.toolResults"),
+                                sessionStats.toolResults.toLocaleString(locale),
+                              ],
+                              [
+                                translate("session.total"),
+                                sessionStats.totalMessages.toLocaleString(
+                                  locale,
+                                ),
+                              ],
+                            ];
+                            const tokenRows = [
+                              [
+                                translate("session.input"),
+                                sessionStats.tokens.input.toLocaleString(
+                                  locale,
+                                ),
+                              ],
+                              [
+                                translate("session.output"),
+                                sessionStats.tokens.output.toLocaleString(
+                                  locale,
+                                ),
+                              ],
+                              ...(sessionStats.tokens.cacheRead > 0
+                                ? [
+                                    [
+                                      translate("session.cacheRead"),
+                                      sessionStats.tokens.cacheRead.toLocaleString(
+                                        locale,
+                                      ),
+                                    ],
+                                  ]
+                                : []),
+                              ...(sessionStats.tokens.cacheWrite > 0
+                                ? [
+                                    [
+                                      translate("session.cacheWrite"),
+                                      sessionStats.tokens.cacheWrite.toLocaleString(
+                                        locale,
+                                      ),
+                                    ],
+                                  ]
+                                : []),
+                              [
+                                translate("session.total"),
+                                sessionStats.tokens.total.toLocaleString(
+                                  locale,
+                                ),
+                              ],
+                            ];
+                            const ctx =
+                              contextUsage ?? sessionStats.contextUsage;
+                            const formatCompact = (n: number) =>
+                              n >= 1_000_000
+                                ? `${(n / 1_000_000).toFixed(1)}M`
+                                : n >= 1000
+                                  ? `${(n / 1000).toFixed(0)}k`
+                                  : String(n);
+                            const extraTokenRows = [
+                              ...(sessionStats.cost > 0
+                                ? [
+                                    [
+                                      translate("session.cost"),
+                                      `$${sessionStats.cost.toFixed(4)}`,
+                                    ],
+                                  ]
+                                : []),
+                              ...(ctx?.contextWindow
+                                ? [
+                                    [
+                                      translate("session.context"),
+                                      `${ctx.percent !== null ? `${ctx.percent.toFixed(1)}%` : "?"} / ${formatCompact(ctx.contextWindow)}`,
+                                    ],
+                                  ]
+                                : []),
+                              // Cache hit rate = cache reads / (input + cache writes + cache reads) — the denominator covers all input-class tokens.
+                              ...(sessionStats.tokens.cacheRead +
+                                sessionStats.tokens.cacheWrite >
+                                0 &&
+                              sessionStats.tokens.cacheRead +
+                                sessionStats.tokens.cacheWrite +
+                                sessionStats.tokens.input >
+                                0
+                                ? [
+                                    [
+                                      translate("session.cacheHitRate"),
+                                      `${((sessionStats.tokens.cacheRead / (sessionStats.tokens.cacheRead + sessionStats.tokens.cacheWrite + sessionStats.tokens.input)) * 100).toFixed(1)}%`,
+                                    ],
+                                  ]
+                                : []),
+                            ];
+                            const section = (
+                              title: string,
+                              sectionRows: string[][],
+                              valueAlign: "left" | "right" = "left",
+                              compact = false,
+                            ) => (
                               <div style={{ minWidth: 0 }}>
                                 <div
                                   style={{
@@ -3723,7 +3673,169 @@ export function AppShell() {
                                     marginBottom: 6,
                                   }}
                                 >
-                                  {translate("session.projectSection")}
+                                  {title}
+                                </div>
+                                <div
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns: compact
+                                      ? "max-content max-content"
+                                      : "auto minmax(0, 1fr)",
+                                    columnGap: compact ? 14 : 12,
+                                    rowGap: 4,
+                                    justifyContent: compact
+                                      ? "start"
+                                      : undefined,
+                                  }}
+                                >
+                                  {sectionRows.map(([label, value]) => (
+                                    <div
+                                      key={`${title}:${label}`}
+                                      style={{ display: "contents" }}
+                                    >
+                                      <div
+                                        style={{
+                                          color: "var(--text-dim)",
+                                          whiteSpace: "nowrap",
+                                        }}
+                                      >
+                                        {label}
+                                      </div>
+                                      <div
+                                        style={{
+                                          color: "var(--text-muted)",
+                                          minWidth: 0,
+                                          overflowWrap: compact
+                                            ? "normal"
+                                            : "anywhere",
+                                          textAlign: valueAlign,
+                                          whiteSpace:
+                                            valueAlign === "right"
+                                              ? "nowrap"
+                                              : "normal",
+                                        }}
+                                      >
+                                        {value}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                            const copyTitleKey: Record<
+                              SessionCopyField,
+                              string
+                            > = {
+                              file: "session.copyFile",
+                              id: "session.copyId",
+                              projectDir: "session.copyProjectDir",
+                              gitBranch: "session.copyGitBranch",
+                              gitWorktree: "session.copyGitWorktree",
+                            };
+                            const copyButton = (
+                              field: SessionCopyField,
+                              value: string,
+                            ) => {
+                              const copied = copiedSessionField === field;
+                              return (
+                                <button
+                                  type="button"
+                                  title={
+                                    copied
+                                      ? translate("session.copied")
+                                      : translate(copyTitleKey[field])
+                                  }
+                                  onClick={() =>
+                                    handleCopySessionField(field, value)
+                                  }
+                                  style={{
+                                    alignSelf: "start",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    width: 22,
+                                    height: 22,
+                                    marginTop: -2,
+                                    color: copied
+                                      ? "var(--accent)"
+                                      : "var(--text-dim)",
+                                    background: "transparent",
+                                    border: "1px solid var(--border)",
+                                    borderRadius: 4,
+                                    cursor: "pointer",
+                                    flex: "0 0 auto",
+                                    transition:
+                                      "color 0.12s, border-color 0.12s, background 0.12s",
+                                  }}
+                                  onMouseEnter={(e) => {
+                                    e.currentTarget.style.color =
+                                      "var(--accent)";
+                                    e.currentTarget.style.borderColor =
+                                      "var(--accent)";
+                                    e.currentTarget.style.background =
+                                      "var(--bg-hover)";
+                                  }}
+                                  onMouseLeave={(e) => {
+                                    e.currentTarget.style.color = copied
+                                      ? "var(--accent)"
+                                      : "var(--text-dim)";
+                                    e.currentTarget.style.borderColor =
+                                      "var(--border)";
+                                    e.currentTarget.style.background =
+                                      "transparent";
+                                  }}
+                                >
+                                  {copied ? (
+                                    <svg
+                                      width="12"
+                                      height="12"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      aria-hidden="true"
+                                    >
+                                      <polyline points="20 6 9 17 4 12" />
+                                    </svg>
+                                  ) : (
+                                    <svg
+                                      width="12"
+                                      height="12"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="2"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                      aria-hidden="true"
+                                    >
+                                      <rect
+                                        x="9"
+                                        y="9"
+                                        width="13"
+                                        height="13"
+                                        rx="2"
+                                        ry="2"
+                                      />
+                                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                                    </svg>
+                                  )}
+                                </button>
+                              );
+                            };
+                            const sessionInfoSection = (
+                              <div style={{ minWidth: 0 }}>
+                                <div
+                                  style={{
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    color: "var(--text)",
+                                    marginBottom: 6,
+                                  }}
+                                >
+                                  {translate("session.infoSection")}
                                 </div>
                                 <div
                                   style={{
@@ -3735,9 +3847,9 @@ export function AppShell() {
                                     alignItems: "start",
                                   }}
                                 >
-                                  {projectRows.map((row) => (
+                                  {sessionRows.map((row) => (
                                     <div
-                                      key={`project-info:${row.label}`}
+                                      key={`session-info:${row.label}`}
                                       style={{ display: "contents" }}
                                     >
                                       <div
@@ -3768,463 +3880,555 @@ export function AppShell() {
                                   ))}
                                 </div>
                               </div>
-                            ) : null;
+                            );
+                            const projectInfoSection =
+                              projectRows.length > 0 ? (
+                                <div style={{ minWidth: 0 }}>
+                                  <div
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: 700,
+                                      color: "var(--text)",
+                                      marginBottom: 6,
+                                    }}
+                                  >
+                                    {translate("session.projectSection")}
+                                  </div>
+                                  <div
+                                    style={{
+                                      display: "grid",
+                                      gridTemplateColumns:
+                                        "auto minmax(0, 1fr) auto",
+                                      columnGap: 12,
+                                      rowGap: 8,
+                                      alignItems: "start",
+                                    }}
+                                  >
+                                    {projectRows.map((row) => (
+                                      <div
+                                        key={`project-info:${row.label}`}
+                                        style={{ display: "contents" }}
+                                      >
+                                        <div
+                                          style={{
+                                            color: "var(--text-dim)",
+                                            whiteSpace: "nowrap",
+                                          }}
+                                        >
+                                          {row.label}
+                                        </div>
+                                        <div
+                                          style={{
+                                            color: "var(--text-muted)",
+                                            minWidth: 0,
+                                            overflowWrap: "anywhere",
+                                            wordBreak: "break-word",
+                                            whiteSpace: "normal",
+                                          }}
+                                        >
+                                          {row.value}
+                                        </div>
+                                        <div>
+                                          {row.copyField
+                                            ? copyButton(
+                                                row.copyField,
+                                                row.value,
+                                              )
+                                            : null}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : null;
 
-                          return (
-                            <div
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns: isMobile
-                                  ? "1fr"
-                                  : "minmax(360px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr)",
-                                gap: isMobile ? 16 : 24,
-                                fontSize: 12,
-                                lineHeight: 1.5,
-                                fontFamily: "var(--font-mono)",
-                              }}
-                            >
+                            return (
                               <div
                                 style={{
-                                  display: "flex",
-                                  flexDirection: "column",
-                                  gap: isMobile ? 16 : 20,
+                                  display: "grid",
+                                  gridTemplateColumns: isMobile
+                                    ? "1fr"
+                                    : "minmax(360px, 1.7fr) minmax(140px, 0.55fr) minmax(190px, 0.75fr)",
+                                  gap: isMobile ? 16 : 24,
+                                  fontSize: 12,
+                                  lineHeight: 1.5,
+                                  fontFamily: "var(--font-mono)",
                                 }}
                               >
-                                {sessionInfoSection}
-                                {projectInfoSection}
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: isMobile ? 16 : 20,
+                                  }}
+                                >
+                                  {sessionInfoSection}
+                                  {projectInfoSection}
+                                </div>
+                                {section(
+                                  translate("session.messages"),
+                                  messageRows,
+                                )}
+                                {section(
+                                  translate("session.tokens"),
+                                  [...tokenRows, ...extraTokenRows],
+                                  "right",
+                                  true,
+                                )}
                               </div>
-                              {section(
-                                translate("session.messages"),
-                                messageRows,
-                              )}
-                              {section(
-                                translate("session.tokens"),
-                                [...tokenRows, ...extraTokenRows],
-                                "right",
-                                true,
-                              )}
-                            </div>
-                          );
-                        })()
-                      ) : (
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: "var(--text-muted)",
-                            fontStyle: "italic",
-                          }}
-                        >
-                          {translate("session.load")}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
+                            );
+                          })()
+                        ) : (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "var(--text-muted)",
+                              fontStyle: "italic",
+                            }}
+                          >
+                            {translate("session.load")}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              {isMobile && renderProjectTrustWarning(true)}
             </div>
-            {isMobile && renderProjectTrustWarning(true)}
+
+            {/* Chat content */}
+            <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
+              {showChat ? (
+                <ChatWindow
+                  key={sessionKey}
+                  session={selectedSession}
+                  searchTarget={
+                    searchTarget?.sessionId === selectedSession?.id
+                      ? searchTarget
+                      : null
+                  }
+                  onSearchTargetHandled={handleSearchTargetHandled}
+                  initialScrollPosition={
+                    selectedSession
+                      ? (sessionScrollPositionsRef.current.get(
+                          selectedSession.id,
+                        ) ?? null)
+                      : null
+                  }
+                  onScrollPositionChange={handleSessionScrollPositionChange}
+                  sessionRunning={Boolean(
+                    selectedSession &&
+                      runningSessionIds.has(selectedSession.id),
+                  )}
+                  newSessionCwd={effectiveNewSessionCwd}
+                  newSessionDraftKey={newSessionDraftKey}
+                  onAgentEnd={handleAgentEnd}
+                  onAttentionNeeded={handleAttentionNeeded}
+                  onSessionCreated={handleSessionCreated}
+                  onSessionForked={handleSessionForked}
+                  modelsRefreshKey={modelsRefreshKey}
+                  chatInputRef={chatInputRef}
+                  onBranchDataChange={handleBranchDataChange}
+                  onSystemPromptChange={handleSystemPromptChange}
+                  onSystemToolsChange={handleSystemToolsChange}
+                  onSystemInfoLoaderChange={handleSystemInfoLoaderChange}
+                  onSessionStatsChange={handleSessionStatsChange}
+                  onSessionStatsPanelOpen={openSessionStatsPanel}
+                  onContextUsageChange={handleContextUsageChange}
+                  onOpenFile={handleOpenLinkedFile}
+                  onOpenSession={handleOpenSession}
+                  onAskInNewChat={handleAskInNewChat}
+                  quoteSelectionEnabled={quoteSelectionEnabled}
+                  initialPrompt={
+                    pendingQuotePrompt?.sessionId === selectedSession?.id
+                      ? pendingQuotePrompt?.text
+                      : undefined
+                  }
+                  onInitialPromptConsumed={() => setPendingQuotePrompt(null)}
+                  soundEnabled={soundEnabled}
+                  onSoundToggle={onSoundToggle}
+                  playDoneSound={playDoneSound}
+                  unlockAudio={unlockAudio}
+                />
+              ) : initialCwdStatus === "validating" ? (
+                <div
+                  role="status"
+                  style={{
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    padding: 24,
+                    color: "var(--text-muted)",
+                    textAlign: "center",
+                  }}
+                >
+                  <div style={{ fontSize: 14, color: "var(--text)" }}>
+                    {translate("workspace.opening")}
+                  </div>
+                  <div
+                    style={{
+                      maxWidth: "min(720px, 100%)",
+                      overflowWrap: "anywhere",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12,
+                    }}
+                  >
+                    {initialNavigation.requestedCwd}
+                  </div>
+                </div>
+              ) : initialCwdStatus === "error" ? (
+                <div
+                  role="alert"
+                  style={{
+                    height: "100%",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    padding: 24,
+                    color: "var(--text-muted)",
+                    textAlign: "center",
+                  }}
+                >
+                  <div style={{ fontSize: 14, color: "#dc2626" }}>
+                    {translate("workspace.unable")}
+                  </div>
+                  <div
+                    style={{
+                      maxWidth: "min(720px, 100%)",
+                      overflowWrap: "anywhere",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12,
+                    }}
+                  >
+                    {initialNavigation.requestedCwd}
+                  </div>
+                  <div style={{ maxWidth: 720, fontSize: 12 }}>
+                    {initialCwdError}
+                  </div>
+                </div>
+              ) : showPlaceholder ? (
+                activeCwd ? (
+                  <div
+                    style={{
+                      height: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "var(--text-muted)",
+                      fontSize: 15,
+                    }}
+                  >
+                    {translate("workspace.selectSession")}
+                  </div>
+                ) : (
+                  <div
+                    className={
+                      DATAHUB_EMBED ? "datahub-get-started" : undefined
+                    }
+                    style={{
+                      position: "absolute",
+                      top: 12,
+                      left: 12,
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 8,
+                      userSelect: "none",
+                      pointerEvents: "none",
+                    }}
+                  >
+                    <svg
+                      width="44"
+                      height="44"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="var(--accent)"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{ opacity: 0.7, flexShrink: 0 }}
+                    >
+                      <line x1="20" y1="12" x2="4" y2="12" />
+                      <polyline points="10 6 4 12 10 18" />
+                    </svg>
+                    <div>
+                      <div
+                        style={{
+                          fontSize: 18,
+                          fontWeight: 600,
+                          color: "var(--text)",
+                          marginBottom: 8,
+                        }}
+                      >
+                        {translate("workspace.getStarted")}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "var(--text-muted)",
+                          lineHeight: 1.8,
+                        }}
+                      >
+                        <span
+                          style={{ color: "var(--text-dim)", marginRight: 6 }}
+                        >
+                          1.
+                        </span>
+                        {translate("workspace.selectProject")}
+                        <br />
+                        <span
+                          style={{ color: "var(--text-dim)", marginRight: 6 }}
+                        >
+                          2.
+                        </span>
+                        {translate("workspace.addModels")}
+                      </div>
+                    </div>
+                  </div>
+                )
+              ) : null}
+            </div>
           </div>
 
-          {/* Chat content */}
-          <div style={{ flex: 1, overflow: "hidden", position: "relative" }}>
-            {showChat ? (
-              <ChatWindow
-                key={sessionKey}
-                session={selectedSession}
-                searchTarget={
-                  searchTarget?.sessionId === selectedSession?.id
-                    ? searchTarget
-                    : null
-                }
-                onSearchTargetHandled={handleSearchTargetHandled}
-                initialScrollPosition={
-                  selectedSession
-                    ? (sessionScrollPositionsRef.current.get(
-                        selectedSession.id,
-                      ) ?? null)
-                    : null
-                }
-                onScrollPositionChange={handleSessionScrollPositionChange}
-                sessionRunning={Boolean(
-                  selectedSession && runningSessionIds.has(selectedSession.id),
-                )}
-                newSessionCwd={effectiveNewSessionCwd}
-                newSessionDraftKey={newSessionDraftKey}
-                onAgentEnd={handleAgentEnd}
-                onAttentionNeeded={handleAttentionNeeded}
-                onSessionCreated={handleSessionCreated}
-                onSessionForked={handleSessionForked}
-                modelsRefreshKey={modelsRefreshKey}
-                chatInputRef={chatInputRef}
-                onBranchDataChange={handleBranchDataChange}
-                onSystemPromptChange={handleSystemPromptChange}
-                onSystemToolsChange={handleSystemToolsChange}
-                onSystemInfoLoaderChange={handleSystemInfoLoaderChange}
-                onSessionStatsChange={handleSessionStatsChange}
-                onSessionStatsPanelOpen={openSessionStatsPanel}
-                onContextUsageChange={handleContextUsageChange}
-                onOpenFile={handleOpenLinkedFile}
-                onOpenSession={handleOpenSession}
-                onAskInNewChat={handleAskInNewChat}
-                quoteSelectionEnabled={quoteSelectionEnabled}
-                initialPrompt={
-                  pendingQuotePrompt?.sessionId === selectedSession?.id
-                    ? pendingQuotePrompt?.text
-                    : undefined
-                }
-                onInitialPromptConsumed={() => setPendingQuotePrompt(null)}
-                soundEnabled={soundEnabled}
-                onSoundToggle={onSoundToggle}
-                playDoneSound={playDoneSound}
-                unlockAudio={unlockAudio}
+          <div
+            aria-hidden="true"
+            className={`right-panel-overlay-backdrop${rightPanelOpen ? " is-open" : ""}${catalogSelection ? ` ${catalogStyles.backdrop}` : ""}`}
+            onClick={() =>
+              catalogSelection ? closeCatalog() : setRightPanelOpen(false)
+            }
+          />
+          {rightPanelOpen &&
+            !catalogSelection &&
+            !(grafanaSelection && grafanaExpanded) && (
+              <div
+                {...rightPanelResizer.separatorProps}
+                aria-controls="file-panel"
+                className={`panel-resize-handle right-panel-resize-handle${rightPanelResizer.isResizing ? " is-resizing" : ""}`}
+                data-resize-handle="right-panel"
+                title={`${translate("layout.resizeFilePanel")}: ${translate("layout.resizeHint")}`}
               />
-            ) : initialCwdStatus === "validating" ? (
-              <div
-                role="status"
+            )}
+
+          {/* Right panel: file viewer — always mounted, width animated via CSS */}
+          <div
+            ref={rightPanelResizer.panelRef}
+            id="file-panel"
+            className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}${catalogSelection ? ` ${catalogStyles.panel}` : ""}${grafanaSelection ? ` ${grafanaStyles.workspace}${grafanaExpanded ? ` ${grafanaStyles.expanded}` : ""}` : ""}`}
+            style={
+              {
+                "--right-panel-width": `${rightPanelResizer.width}px`,
+                display: "flex",
+                flexDirection: "column",
+                borderLeft: "1px solid var(--border)",
+                background: "var(--bg)",
+              } as React.CSSProperties
+            }
+          >
+            {grafanaSelection && (
+              <div className={grafanaStyles.slot}>
+                <DataHubGrafanaPanel
+                  key={grafanaSelection.requestId}
+                  embed={grafanaSelection}
+                  expanded={grafanaExpanded}
+                  onExpandAction={() => setGrafanaExpanded((v) => !v)}
+                  onCloseAction={closeGrafana}
+                />
+              </div>
+            )}
+            {catalogSelection && (
+              <div className={catalogStyles.slot}>
+                <DataHubCatalogDetail
+                  key={JSON.stringify(catalogSelection)}
+                  selection={catalogSelection}
+                  onClose={closeCatalog}
+                  onQuote={(reference) => {
+                    closeCatalog();
+                    chatInputRef.current?.addCatalogReference(reference);
+                  }}
+                />
+              </div>
+            )}
+            {/* Right panel tab bar */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                flexShrink: 0,
+                height: "calc(36px + env(safe-area-inset-top))",
+                paddingTop: "env(safe-area-inset-top)",
+                background: "var(--bg-panel)",
+                borderBottom: "1px solid var(--border)",
+              }}
+            >
+              <div style={{ flex: 1, overflow: "hidden" }}>
+                <TabBar
+                  tabs={panelTabs}
+                  activeTabId={activeFileTabId ?? ""}
+                  onSelectTab={setActiveFileTabId}
+                  onCloseTab={handleCloseFileTab}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setRightPanelOpen(false)}
+                aria-controls="file-panel"
+                aria-expanded={rightPanelOpen}
+                title={translate("files.hidePanel")}
+                aria-label={translate("files.hidePanel")}
                 style={{
-                  height: "100%",
                   display: "flex",
-                  flexDirection: "column",
                   alignItems: "center",
                   justifyContent: "center",
-                  gap: 8,
-                  padding: 24,
-                  color: "var(--text-muted)",
-                  textAlign: "center",
+                  width: TOP_BAR_ICON_BUTTON_SIZE,
+                  height: TOP_BAR_ICON_BUTTON_SIZE,
+                  padding: 0,
+                  background: "var(--bg-selected)",
+                  border: "none",
+                  borderLeft: "1px solid var(--border)",
+                  color: "var(--text)",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                  transition: "color 0.12s",
+                }}
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.color = "var(--accent)";
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.color = "var(--text)";
                 }}
               >
-                <div style={{ fontSize: 14, color: "var(--text)" }}>
-                  {translate("workspace.opening")}
-                </div>
-                <div
-                  style={{
-                    maxWidth: "min(720px, 100%)",
-                    overflowWrap: "anywhere",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 12,
-                  }}
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
                 >
-                  {initialNavigation.requestedCwd}
-                </div>
-              </div>
-            ) : initialCwdStatus === "error" ? (
-              <div
-                role="alert"
-                style={{
-                  height: "100%",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 8,
-                  padding: 24,
-                  color: "var(--text-muted)",
-                  textAlign: "center",
-                }}
-              >
-                <div style={{ fontSize: 14, color: "#dc2626" }}>
-                  {translate("workspace.unable")}
-                </div>
-                <div
-                  style={{
-                    maxWidth: "min(720px, 100%)",
-                    overflowWrap: "anywhere",
-                    fontFamily: "var(--font-mono)",
-                    fontSize: 12,
-                  }}
-                >
-                  {initialNavigation.requestedCwd}
-                </div>
-                <div style={{ maxWidth: 720, fontSize: 12 }}>
-                  {initialCwdError}
-                </div>
-              </div>
-            ) : showPlaceholder ? (
-              activeCwd ? (
+                  <rect x="3" y="3" width="18" height="18" rx="2" />
+                  <line x1="15" y1="3" x2="15" y2="21" />
+                </svg>
+              </button>
+            </div>
+
+            {/* Only the active viewer is mounted. Lightweight per-tab state is restored on activation. */}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflow: "hidden",
+                paddingBottom: "env(safe-area-inset-bottom)",
+              }}
+            >
+              {activeFileTab?.filePath ? (
+                <FileViewer
+                  key={`${activeFileTab.id}:${activeFileTab.viewerRevision ?? 0}`}
+                  filePath={activeFileTab.filePath}
+                  cwd={activeCwd ?? undefined}
+                  sourceSessionId={activeFileTab.sourceSessionId}
+                  gitRefreshKey={explorerRefreshKey}
+                  initialDisplayMode={activeFileTab.initialDisplayMode}
+                  initialState={activeFileTab.viewerState}
+                  watchEnabled={rightPanelOpen}
+                  onStateChange={(viewerState) =>
+                    handleFileViewerStateChange(
+                      activeFileTab.id,
+                      activeFileTab.viewerRevision ?? 0,
+                      viewerState,
+                    )
+                  }
+                  onMentionLines={
+                    rightPanelOpen ? handleFileLineMention : undefined
+                  }
+                  onAtMention={handleAtMention}
+                  onOpenFile={(filePath) =>
+                    handleOpenFile(filePath, getFileName(filePath), {
+                      sourceSessionId: activeFileTab.sourceSessionId,
+                    })
+                  }
+                />
+              ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) ? (
                 <div
                   style={{
                     height: "100%",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    color: "var(--text-muted)",
-                    fontSize: 15,
+                    color: "var(--text-dim)",
+                    fontSize: 12,
                   }}
                 >
-                  {translate("workspace.selectSession")}
+                  {translate("files.noneOpen")}
                 </div>
-              ) : (
+              ) : null}
+              {terminalTabs.map((tab) => (
                 <div
-                  className={DATAHUB_EMBED ? "datahub-get-started" : undefined}
-                  style={{
-                    position: "absolute",
-                    top: 12,
-                    left: 12,
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: 8,
-                    userSelect: "none",
-                    pointerEvents: "none",
-                  }}
+                  key={tab.id}
+                  hidden={tab.id !== activeFileTabId}
+                  style={{ width: "100%", height: "100%" }}
                 >
-                  <svg
-                    width="44"
-                    height="44"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="var(--accent)"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ opacity: 0.7, flexShrink: 0 }}
-                  >
-                    <line x1="20" y1="12" x2="4" y2="12" />
-                    <polyline points="10 6 4 12 10 18" />
-                  </svg>
-                  <div>
-                    <div
-                      style={{
-                        fontSize: 18,
-                        fontWeight: 600,
-                        color: "var(--text)",
-                        marginBottom: 8,
-                      }}
-                    >
-                      {translate("workspace.getStarted")}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: "var(--text-muted)",
-                        lineHeight: 1.8,
-                      }}
-                    >
-                      <span
-                        style={{ color: "var(--text-dim)", marginRight: 6 }}
-                      >
-                        1.
-                      </span>
-                      {translate("workspace.selectProject")}
-                      <br />
-                      <span
-                        style={{ color: "var(--text-dim)", marginRight: 6 }}
-                      >
-                        2.
-                      </span>
-                      {translate("workspace.addModels")}
-                    </div>
-                  </div>
+                  <TerminalPanel
+                    tab={tab}
+                    active={rightPanelOpen && tab.id === activeFileTabId}
+                    onRestart={() =>
+                      setTerminalTabs((tabs) =>
+                        tabs.map((item) =>
+                          item.id === tab.id
+                            ? { ...item, closing: "restart" }
+                            : item,
+                        ),
+                      )
+                    }
+                    onClosed={() => handleTerminalClosed(tab)}
+                    onCloseError={() =>
+                      setTerminalTabs((tabs) =>
+                        tabs.map((item) =>
+                          item.id === tab.id
+                            ? { ...item, closing: undefined }
+                            : item,
+                        ),
+                      )
+                    }
+                  />
                 </div>
-              )
-            ) : null}
+              ))}
+            </div>
           </div>
         </div>
-
-        <div
-          aria-hidden="true"
-          className={`right-panel-overlay-backdrop${rightPanelOpen ? " is-open" : ""}`}
-          onClick={() => setRightPanelOpen(false)}
-        />
-        {rightPanelOpen && (
-          <div
-            {...rightPanelResizer.separatorProps}
-            aria-controls="file-panel"
-            className={`panel-resize-handle right-panel-resize-handle${rightPanelResizer.isResizing ? " is-resizing" : ""}`}
-            data-resize-handle="right-panel"
-            title={`${translate("layout.resizeFilePanel")}: ${translate("layout.resizeHint")}`}
+        {settingsSection && (
+          <SettingsPanel
+            cwd={projectTrustCwd}
+            sessionId={selectedSession?.id ?? null}
+            initialSection={settingsSection}
+            quoteSelectionEnabled={quoteSelectionEnabled}
+            onQuoteSelectionChange={handleQuoteSelectionChange}
+            onClose={() => {
+              setSettingsSection(null);
+              setModelsRefreshKey((key) => key + 1);
+            }}
+            onSessionReloaded={() => setSessionKey((key) => key + 1)}
           />
         )}
-
-        {/* Right panel: file viewer — always mounted, width animated via CSS */}
-        <div
-          ref={rightPanelResizer.panelRef}
-          id="file-panel"
-          className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}`}
-          style={
-            {
-              "--right-panel-width": `${rightPanelResizer.width}px`,
-              display: "flex",
-              flexDirection: "column",
-              borderLeft: "1px solid var(--border)",
-              background: "var(--bg)",
-            } as React.CSSProperties
-          }
-        >
-          {/* Right panel tab bar */}
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              flexShrink: 0,
-              height: "calc(36px + env(safe-area-inset-top))",
-              paddingTop: "env(safe-area-inset-top)",
-              background: "var(--bg-panel)",
-              borderBottom: "1px solid var(--border)",
+        {projectTrustDialogOpen && projectTrustCwd && (
+          <ProjectTrustDialog
+            cwd={projectTrustCwd}
+            busy={projectTrustBusy}
+            error={projectTrustError}
+            onCancel={() => {
+              if (!projectTrustBusy) setProjectTrustDialogOpen(false);
             }}
-          >
-            <div style={{ flex: 1, overflow: "hidden" }}>
-              <TabBar
-                tabs={panelTabs}
-                activeTabId={activeFileTabId ?? ""}
-                onSelectTab={setActiveFileTabId}
-                onCloseTab={handleCloseFileTab}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => setRightPanelOpen(false)}
-              aria-controls="file-panel"
-              aria-expanded={rightPanelOpen}
-              title={translate("files.hidePanel")}
-              aria-label={translate("files.hidePanel")}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                width: TOP_BAR_ICON_BUTTON_SIZE,
-                height: TOP_BAR_ICON_BUTTON_SIZE,
-                padding: 0,
-                background: "var(--bg-selected)",
-                border: "none",
-                borderLeft: "1px solid var(--border)",
-                color: "var(--text)",
-                cursor: "pointer",
-                flexShrink: 0,
-                transition: "color 0.12s",
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.color = "var(--accent)";
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.color = "var(--text)";
-              }}
-            >
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <rect x="3" y="3" width="18" height="18" rx="2" />
-                <line x1="15" y1="3" x2="15" y2="21" />
-              </svg>
-            </button>
-          </div>
-
-          {/* Only the active viewer is mounted. Lightweight per-tab state is restored on activation. */}
-          <div
-            style={{
-              flex: 1,
-              minHeight: 0,
-              overflow: "hidden",
-              paddingBottom: "env(safe-area-inset-bottom)",
-            }}
-          >
-            {activeFileTab?.filePath ? (
-              <FileViewer
-                key={`${activeFileTab.id}:${activeFileTab.viewerRevision ?? 0}`}
-                filePath={activeFileTab.filePath}
-                cwd={activeCwd ?? undefined}
-                sourceSessionId={activeFileTab.sourceSessionId}
-                gitRefreshKey={explorerRefreshKey}
-                initialDisplayMode={activeFileTab.initialDisplayMode}
-                initialState={activeFileTab.viewerState}
-                watchEnabled={rightPanelOpen}
-                onStateChange={(viewerState) =>
-                  handleFileViewerStateChange(
-                    activeFileTab.id,
-                    activeFileTab.viewerRevision ?? 0,
-                    viewerState,
-                  )
-                }
-                onMentionLines={
-                  rightPanelOpen ? handleFileLineMention : undefined
-                }
-                onAtMention={handleAtMention}
-                onOpenFile={(filePath) =>
-                  handleOpenFile(filePath, getFileName(filePath), {
-                    sourceSessionId: activeFileTab.sourceSessionId,
-                  })
-                }
-              />
-            ) : !terminalTabs.some((tab) => tab.id === activeFileTabId) ? (
-              <div
-                style={{
-                  height: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "var(--text-dim)",
-                  fontSize: 12,
-                }}
-              >
-                {translate("files.noneOpen")}
-              </div>
-            ) : null}
-            {terminalTabs.map((tab) => (
-              <div
-                key={tab.id}
-                hidden={tab.id !== activeFileTabId}
-                style={{ width: "100%", height: "100%" }}
-              >
-                <TerminalPanel
-                  tab={tab}
-                  active={rightPanelOpen && tab.id === activeFileTabId}
-                  onRestart={() =>
-                    setTerminalTabs((tabs) =>
-                      tabs.map((item) =>
-                        item.id === tab.id
-                          ? { ...item, closing: "restart" }
-                          : item,
-                      ),
-                    )
-                  }
-                  onClosed={() => handleTerminalClosed(tab)}
-                  onCloseError={() =>
-                    setTerminalTabs((tabs) =>
-                      tabs.map((item) =>
-                        item.id === tab.id
-                          ? { ...item, closing: undefined }
-                          : item,
-                      ),
-                    )
-                  }
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      {settingsSection && (
-        <SettingsPanel
-          cwd={projectTrustCwd}
-          sessionId={selectedSession?.id ?? null}
-          initialSection={settingsSection}
-          quoteSelectionEnabled={quoteSelectionEnabled}
-          onQuoteSelectionChange={handleQuoteSelectionChange}
-          onClose={() => {
-            setSettingsSection(null);
-            setModelsRefreshKey((key) => key + 1);
-          }}
-          onSessionReloaded={() => setSessionKey((key) => key + 1)}
-        />
-      )}
-      {projectTrustDialogOpen && projectTrustCwd && (
-        <ProjectTrustDialog
-          cwd={projectTrustCwd}
-          busy={projectTrustBusy}
-          error={projectTrustError}
-          onCancel={() => {
-            if (!projectTrustBusy) setProjectTrustDialogOpen(false);
-          }}
-          onConfirm={() => void handleTrustProject()}
-        />
-      )}
-    </>
+            onConfirm={() => void handleTrustProject()}
+          />
+        )}
+      </CatalogContext.Provider>
+    </GrafanaContext.Provider>
   );
 }

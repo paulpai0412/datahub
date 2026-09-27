@@ -1,5 +1,6 @@
-import { readFile } from "node:fs/promises";
-import { resolve, dirname } from "node:path";
+import { readFile, open } from "node:fs/promises";
+import { constants } from "node:fs";
+import { resolve, dirname, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { once } from "node:events";
 import { createAgentGateway } from "./gateway.mjs";
@@ -8,6 +9,11 @@ import { createRuntimeManager } from "./runtime-manager.mjs";
 import { validateEgressOrigins } from "./egress-proxy.mjs";
 import { ingestionPolicies } from "./ingestion-policy.mjs";
 import { nativeIngestion } from "./native-ingestion.mjs";
+import {
+  nativeCatalog,
+  CatalogError,
+  catalogPolicies,
+} from "./native-catalog.mjs";
 import { SemanticError } from "./native-semantic.mjs";
 import { semanticHost } from "./native-semantic-tasks.mjs";
 import { nativeTasks } from "./native-tasks.mjs";
@@ -20,6 +26,17 @@ import {
   DiscoveryError,
 } from "./native-discovery.mjs";
 import { taskRuntime } from "./task-runtime.mjs";
+import { createSqlHost, sqlPolicies } from "./native-sql.mjs";
+import { createGrafanaHost, grafanaPolicies } from "./native-grafana.mjs";
+import { sqlAssetAuthorizer } from "./native-sql-assets.mjs";
+import { queryMetadataReader } from "./query-metadata.mjs";
+import { queryBindings, createQuerySource } from "./query-source.mjs";
+import { queryGrafanaConfig, createQueryGrafana } from "./query-grafana.mjs";
+import { createMetadataQueryHost } from "./metadata-query.mjs";
+import {
+  createSalesSourceExecutor,
+  protectedSalesPassword,
+} from "./sales-sql-runner.mjs";
 
 const fields = new Set([
   "scope",
@@ -35,7 +52,43 @@ const fields = new Set([
   "ingestionSourcesByActor",
   "discoverySourcesByActor",
   "fixedEtlGrantsByActor",
+  "catalogReadByActor",
+  "sqlSourceOnlyGrantsByActor",
+  "sqlPasswordPath",
+  "grafanaDisplaysByActor",
+  "grafanaServiceKeyPath",
+  "queryConnections",
+  "queryGrafana",
 ]);
+
+async function protectedGrafanaServiceKey(path) {
+  if (typeof path !== "string" || !isAbsolute(path))
+    throw new Error("invalid_grafana_service_key");
+  let file;
+  try {
+    file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const info = await file.stat();
+    if (
+      !info.isFile() ||
+      info.uid !== process.getuid() ||
+      (info.mode & 0o077) !== 0 ||
+      info.size < 43 ||
+      info.size > 45
+    )
+      throw new Error();
+    const key = (await file.readFile("utf8")).trim();
+    if (
+      !/^[A-Za-z0-9_-]{43}$/.test(key) ||
+      Buffer.from(key, "base64url").length !== 32
+    )
+      throw new Error();
+    return key;
+  } catch {
+    throw new Error("invalid_grafana_service_key");
+  } finally {
+    await file?.close();
+  }
+}
 
 /** Local-only entrypoint. Config is operator-owned, never supplied by a browser.
  * The standalone manager has no simulated identity or credential-discovery path. */
@@ -63,17 +116,52 @@ export async function startAgentServer(config) {
     validateEgressOrigins(origins);
     actorOrigins.set(key, [...origins]);
   }
+  const catalogScopes = catalogPolicies(config.catalogReadByActor);
   const sourcePolicies = ingestionPolicies(config.ingestionSourcesByActor);
   const executionPolicies = fixedEtlPolicies(
     config.fixedEtlGrantsByActor,
     sourcePolicies,
   );
   const discoveryScopes = discoveryPolicies(config.discoverySourcesByActor);
+  const queryConnections = queryBindings(config.queryConnections);
+  const generalQuery = config.queryGrafana !== undefined;
+  if (
+    generalQuery &&
+    (config.sqlSourceOnlyGrantsByActor !== undefined ||
+      config.grafanaDisplaysByActor !== undefined ||
+      config.sqlPasswordPath !== undefined)
+  )
+    throw new Error("query_legacy_configuration_conflict");
+  if (!generalQuery && queryConnections.length)
+    throw new Error("query_grafana_configuration_required");
+  const sqlScopes = sqlPolicies(config.sqlSourceOnlyGrantsByActor, {
+    sourceOnly: true,
+  });
+  if (sqlScopes.size > 0 !== (config.sqlPasswordPath !== undefined))
+    throw new Error("invalid_agent_server_configuration");
+  const sqlHost =
+    sqlScopes.size > 0
+      ? createSqlHost({
+          policies: sqlScopes,
+          sourceOnly: true,
+          authorizeAssets: sqlAssetAuthorizer({
+            frontendOrigin: config.datahubOrigin,
+          }),
+          executeSource: createSalesSourceExecutor({
+            getPassword: protectedSalesPassword(config.sqlPasswordPath),
+          }),
+        })
+      : null;
   const analysisActive = new Set();
   async function analyzeBounded(actor, exhausted, operation) {
-    if (analysisActive.has(actor.key) || analysisActive.size >= 2) throw exhausted;
+    if (analysisActive.has(actor.key) || analysisActive.size >= 2)
+      throw exhausted;
     analysisActive.add(actor.key);
-    try { return await operation(); } finally { analysisActive.delete(actor.key); }
+    try {
+      return await operation();
+    } finally {
+      analysisActive.delete(actor.key);
+    }
   }
   let gatewayOrigin;
   try {
@@ -111,6 +199,55 @@ export async function startAgentServer(config) {
     frontendOrigin: config.datahubOrigin,
     tenant: config.tenant,
   });
+  const grafanaScopes = grafanaPolicies(config.grafanaDisplaysByActor, {
+    datahubOrigin: config.datahubOrigin,
+  });
+  for (const [actorKey, display] of grafanaScopes) {
+    const source = sqlScopes.get(actorKey);
+    if (
+      !sqlHost ||
+      !source ||
+      source.datasetUrn !== display.datasetUrn ||
+      source.expiresAt < display.expiresAt ||
+      source.maxExecutions !== 1 ||
+      !catalogScopes.has(actorKey)
+    )
+      throw new Error("invalid_grafana_policy");
+  }
+  if (
+    Boolean(grafanaScopes.size || generalQuery) !==
+    (config.grafanaServiceKeyPath !== undefined)
+  )
+    throw new Error("invalid_grafana_policy");
+  const grafanaServiceKey =
+    grafanaScopes.size || generalQuery
+      ? await protectedGrafanaServiceKey(config.grafanaServiceKeyPath)
+      : undefined;
+  const grafanaHost = grafanaScopes.size
+    ? createGrafanaHost({
+        policies: grafanaScopes,
+        readSqlResult: (text, context) =>
+          sqlHost.readResult(text, context, { includeInternalExpiry: true }),
+        verifyIdentity,
+      })
+    : null;
+  const generalGrafana = generalQuery
+    ? queryGrafanaConfig(config.queryGrafana, config.datahubOrigin)
+    : null;
+  const queryHost = generalQuery
+    ? createMetadataQueryHost({
+        bindings: queryConnections,
+        readMetadata: queryMetadataReader({
+          frontendOrigin: config.datahubOrigin,
+        }),
+        source: createQuerySource(),
+        grafana: generalGrafana,
+        publishDashboard: createQueryGrafana({ config: generalGrafana }),
+        verifyIdentity,
+      })
+    : null;
+  const activeSql = queryHost ?? sqlHost;
+  const activeGrafana = queryHost ?? grafanaHost;
   let manager, server;
   let closing;
   const close = () => {
@@ -141,6 +278,28 @@ export async function startAgentServer(config) {
         manager.setAllowedOrigins(actor, actorOrigins.get(actor.key) ?? []);
         return runtime;
       },
+      grafanaRequest: activeGrafana?.request,
+      grafanaData: activeGrafana?.read,
+      grafanaServiceKey,
+      queryGrafanaOrigin: generalGrafana?.origin,
+      grafanaOriginByActor: new Map(
+        [...grafanaScopes].map(([actorKey, display]) => [
+          actorKey,
+          display.grafanaOrigin,
+        ]),
+      ),
+      sqlRequest: activeSql?.execute,
+      sqlResultRequest: activeSql?.readResult,
+      catalogRequest: (text, context) => {
+        const policy = catalogScopes.get(context.actor.key);
+        if (!policy && !generalQuery)
+          throw new CatalogError("catalog_not_configured", 403);
+        return nativeCatalog(text, {
+          ...context,
+          propertyNames: policy?.propertyNames ?? [],
+          frontendOrigin: config.datahubOrigin,
+        });
+      },
       ingestionRequest: (text, context) =>
         nativeIngestion(text, {
           ...context,
@@ -148,32 +307,45 @@ export async function startAgentServer(config) {
           frontendOrigin: config.datahubOrigin,
         }),
       semanticRequest: (text, context) =>
-        analyzeBounded(context.actor, new SemanticError("semantic_capacity_exhausted", 429), () => semanticHost(text, {
-          ...context,
-          runtime: { state: async (sessionId) => taskRuntime(await context.getRuntime(), context.assertActive).state(sessionId) },
-          sources: sourcePolicies.get(context.actor.key) ?? [],
-          frontendOrigin: config.datahubOrigin,
-        })),
+        analyzeBounded(
+          context.actor,
+          new SemanticError("semantic_capacity_exhausted", 429),
+          () =>
+            semanticHost(text, {
+              ...context,
+              runtime: {
+                state: async (sessionId) =>
+                  taskRuntime(
+                    await context.getRuntime(),
+                    context.assertActive,
+                  ).state(sessionId),
+              },
+              sources: sourcePolicies.get(context.actor.key) ?? [],
+              frontendOrigin: config.datahubOrigin,
+            }),
+        ),
       discoveryRequest: (text, context) =>
         // One shared parser pool covers Discovery, Semantic and workspace import.
         // Runtime and SQL concurrency remain independently controlled.
-        analyzeBounded(context.actor, new DiscoveryError("discovery_capacity_exhausted", 429), () => nativeDiscovery(text, {
-          actor: context.actor,
-          assertActive: context.assertActive,
-          sources: discoveryScopes.get(context.actor.key) ?? [],
-          frontendOrigin: config.datahubOrigin,
-          cookieHeader: context.cookieHeader,
-        })),
+        analyzeBounded(
+          context.actor,
+          new DiscoveryError("discovery_capacity_exhausted", 429),
+          () =>
+            nativeDiscovery(text, {
+              actor: context.actor,
+              assertActive: context.assertActive,
+              sources: discoveryScopes.get(context.actor.key) ?? [],
+              frontendOrigin: config.datahubOrigin,
+              cookieHeader: context.cookieHeader,
+            }),
+        ),
       taskRequest: async (text, context) => {
         const compiling = [
           "prepare_workspace_import",
           "respond_workspace_import",
         ].includes(JSON.parse(text)?.action);
         if (compiling) {
-          if (
-            analysisActive.has(context.actor.key) ||
-            analysisActive.size >= 2
-          )
+          if (analysisActive.has(context.actor.key) || analysisActive.size >= 2)
             throw new DiscoveryError("discovery_capacity_exhausted", 429);
           analysisActive.add(context.actor.key);
         }

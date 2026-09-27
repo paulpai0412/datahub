@@ -14,7 +14,7 @@ apply plugin: 'java-library'
 apply plugin: 'pegasus'
 
 group = 'com.ekop'
-version = '0.1.8'
+version = '0.1.9'
 // Keep released artifacts and generated classes intact; each model version gets
 // its own build tree, so an old jar cannot leak into the new registry ZIP.
 layout.buildDirectory = layout.projectDirectory.dir("build/${version}")
@@ -70,5 +70,24 @@ tasks.register('modelArtifact', Zip) {
     destinationDirectory = layout.buildDirectory.dir('dist')
 }
 
-check.dependsOn modelCheck
+tasks.register('privateModelCheck', JavaExec) {
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.ekop.agent.PrivateSemanticModelCheck'
+    jvmArgs '-XX:ActiveProcessorCount=1', '-Xmx256m'
+}
+
+tasks.register('privateRegistryCheck', JavaExec) {
+    dependsOn testClasses, modelArtifact
+    // Keep generated plugin classes OUT: load each release from its own JARs,
+    // not the parent classpath, so compatibility checks cannot compare to self.
+    classpath = files(sourceSets.test.output, coreLibraries)
+    mainClass = 'com.ekop.agent.PrivateSemanticRegistryCheck'
+    args layout.buildDirectory.file("dist/${project.name}-${version}.zip").get().asFile,
+        version.toString()
+    if (project.hasProperty('previousModel')) args project.property('previousModel')
+    jvmArgs '-XX:ActiveProcessorCount=1', '-Xmx512m'
+}
+
+check.dependsOn modelCheck, privateModelCheck, privateRegistryCheck
 build.dependsOn modelArtifact

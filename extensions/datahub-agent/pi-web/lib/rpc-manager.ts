@@ -68,12 +68,14 @@ import {
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { resolveShellTools } from "./powershell-settings";
+import { PRESET_DATAHUB_ONLY } from "./tool-presets";
 import {
   CHAT_ONLY_RESOURCE_LOADER_OPTIONS,
   contextFilesSystemPrompt,
 } from "./chat-only";
 import {
   appendSessionToolSelection,
+  isDataHubOnlySelection,
   readSessionToolSelection,
   validateSessionToolSelection,
 } from "./session-tool-selection";
@@ -149,6 +151,7 @@ type ExtensionCommandContextActionsLike = {
 type AgentSessionWrapperOptions = {
   exactSystemPrompt?: () => string;
   chatOnly?: boolean;
+  selectedToolNames?: string[];
   onAgentRunComplete?: AgentRunCompleteListener;
   suppressCompletionNotifications?: boolean;
 };
@@ -277,11 +280,15 @@ class PlainTextTheme extends Theme {
 const PLAIN_TEXT_THEME = new PlainTextTheme();
 const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 
-function withExtensionTools(
+export function withExtensionTools(
   session: AgentSessionLike,
   toolNames: string[],
 ): string[] {
   if (toolNames.length === 0) return [];
+  if (isDataHubOnlySelection(toolNames)) {
+    const available = new Set(session.getAllTools().map((tool) => tool.name));
+    return PRESET_DATAHUB_ONLY.filter((name) => available.has(name));
+  }
 
   const codingToolNames = new Set(CODING_TOOL_NAMES);
   const selectedToolNames = resolveShellTools(
@@ -320,6 +327,7 @@ export class AgentSessionWrapper {
   private extensionsBound = false;
   private extensionBindingPromise: Promise<void> | null = null;
   private extensionBindingError: unknown = null;
+  private selectedToolNames: string[] | undefined;
   private readonly exactSystemPrompt?: () => string;
   private readonly chatOnly: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
@@ -338,6 +346,7 @@ export class AgentSessionWrapper {
   ) {
     this.exactSystemPrompt = options.exactSystemPrompt;
     this.chatOnly = options.chatOnly ?? false;
+    this.selectedToolNames = options.selectedToolNames;
     this.onAgentRunComplete = options.onAgentRunComplete;
     this.suppressCompletionNotifications =
       options.suppressCompletionNotifications ?? false;
@@ -474,6 +483,13 @@ export class AgentSessionWrapper {
       } else {
         this.inner.extensionRunner.setUIContext?.(uiContext, "rpc");
       }
+      // Some extension tools register during bindExtensions. Reapply the
+      // explicit narrow set before any prompt or tool-read can observe them.
+      if (
+        this.selectedToolNames &&
+        isDataHubOnlySelection(this.selectedToolNames)
+      )
+        this.setActiveToolSelection(this.selectedToolNames);
       this.extensionsBound = true;
       this.applyExactSystemPrompt();
       console.log(
@@ -506,6 +522,7 @@ export class AgentSessionWrapper {
       type === "steer" ||
       type === "follow_up" ||
       type === "get_commands" ||
+      type === "get_tools" ||
       type === "get_state"
     );
   }
@@ -539,6 +556,7 @@ export class AgentSessionWrapper {
   }
 
   setActiveToolSelection(toolNames: string[]): void {
+    this.selectedToolNames = [...toolNames];
     this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
     this.applyExactSystemPrompt();
   }
@@ -2539,6 +2557,7 @@ export async function startRpcSession(
     const wrapper = new AgentSessionWrapper(inner, {
       exactSystemPrompt,
       chatOnly,
+      selectedToolNames,
       onAgentRunComplete: (completedSessionId) => {
         void notifySessionComplete(completedSessionId).catch((error) => {
           console.error(

@@ -4,7 +4,11 @@
 
 已確認授權：DataHub 多使用者，各自隔離 workspace／session／credentials；允許本專案限定部署、AdventureWorks2019 metadata 讀取、本地 DataHub 可辨識測試 Source／Agent／Task／lineage metadata 寫入。不修改業務資料、不刪既有 metadata、不動其他服務、不 commit/push、不派子代理。模型憑證由使用者在新設定頁另行配置，不複用開發機憑證。使用者後續指定實作與安全檢查皆由主代理執行、不派 reviewer；報告標示自查非獨審。安全負例、隔離與模型 live 驗收仍不能以一般 source tests 代替。
 
+**2026-09-24 SQL／Grafana 分工補充：** 參照 [SalesDatamart 設計 §7.1](datahub-sales-datamart-v1.md)：Agent 依 Catalog 與已核准語義提出有界查詢意圖；可信 Host 以核准模板／有效 Join 契約形成並檢查最終 SQL，透過受控入口執行；Grafana skill 只提供圖表／dashboard 的製作指引，chat 專用圖卡與查詢權限均須另驗。不把既有唯讀 Catalog 卡片或技能安裝當成已可執行 SQL。追蹤 `TODO-a064929f`、`TODO-51730abb`、`TODO-a5722aab`。
+
 ## 1. 最新需求與取代範圍
+
+**2026-09-22 Catalog 查詢 UI 補充：** 使用者選定 B 方案「對話＋結構化結果卡片＋輕量血緣檢視」，點卡於右側彈出 Detail Sidecard，呈現與互動均不可直接使用 JSON。**卡片及 Sidecard 必須移植固定版 DataHub 原生 layout／樣式／compact profile 格式，不只是配色；只保留查詢，移除全部編輯／新增／刪除／發布操作，後端同樣限制唯讀。** 原生頁籤與區塊優先於先前自訂五橫向 tabs／560px 的視覺建議，不修改 Core、不直接依賴 Core 私有 UI runtime。能力清單、八類卡片、詳情／返回／追問、狀態／ACL 與驗收以 [Catalog Explorer 設計](../design/datahub-agent-catalog-explorer.md) 為準；已依使用者後續要求建立 `TODO-cdd3f40a` 並開始[本地實作](../verification/datahub-agent-catalog-explorer-local.md)，B1／B2 尚未完成；本機 Agent-only 候選已經授權部署與部分真入口驗證，不等於完整功能驗收。使用者已確認繼續目前 Host／公開 API 設計、不遷移成全部 MCP；32 項真 native-adapter 讀取已通過，含 Browse V2 的 DB／schema 定位、真3輸入→1輸出欄位群組及下游讀回；治理關聯目前只有空頁證據，不能當非空成功。可信 review 開啟時收起 Catalog 的協調、固定版原生 glyph、欄位 metadata 與來源分列已接線；另有17個圖形／license來源核對與10個真欄位投影檢查，compact欄位表與各entity實際治理讀取範圍亦已接線。DataHub管理的同源`/assets/`平台／profile圖片、原生instance標籤與已確認Columns／highlightedPath／Lineage連結也已接，不接受任意metadata URL；固定版source核對不能取代真圖片與browser驗收；目前MSSQL logo已取得真HTTP／browser證據。後續本機真模型→Host→卡片／詳情已成功，初次失敗的Browse V2 DataPlatformInstance祖先型別缺口已修復；最新真adapter回歸33項PASS，真3輸入→1輸出群組也在Sidecard圖／表讀回。390px必須依使用者同意先以官方Navbar收合左欄（66→318px）才可用，插件關閉控制44×44；跨Actor／送出中失效負例、標準Dockerfile乾淨建置與正式downstream仍缺；單一目前Actor的斷線後真Grant經96秒到期、同Cookie從200轉401已有有界真證據；真正Browser 200% zoom已用隔離Chromium原生profile在完成的真Agent session取得可讀截圖、焦點及Escape正例，不以先前CDP等效版面充數。現已以一筆真模型prompt驗證Composer引用送出後重新由Host讀`datahub_catalog`並增生可點卡片，選中aspects前後不變；AdventureWorks真下游卡片5條邊圖／表與一跳導航另有正例、同root 80候選／47讀未見兩跳；依使用者建議查Salesdatamart後，真Agent Sidecard已逐層讀回三資產兩跳與16條圖／表關係，循環和非空治理仍缺；另有隔離541檔downstream候選通過原checker，但正式工作樹lock仍未整合獨立髒修改。原先離線證據不能當成未通過項的替代。詳見同頁驗證紀錄。既有 ETL／審核流程不變，也不復活已移除的手動 Tasks 面板。
 
 依使用者最新決定：
 
@@ -119,6 +123,8 @@ extensions/datahub-agent/
 - composer 貼齊**工作區**底部，不覆蓋 DataHub 全頁；對話區單獨捲動。
 
 ### 開啟右側詳情時
+
+**Catalog 查詢特例（2026-09-22 更新）：** 依 [B 方案](../design/datahub-agent-catalog-explorer.md) 採工作區內右側 overlay Sidecard，不以新增 flex child 或 split pane 推移訊息。卡片點選後在同一 Sidecard 內切換總覽／欄位／血緣／屬性／來源與限制；任何細節或錯誤均不直接展示 JSON。下方 split-pane 示意仍供既有 Files／Terminal 等 workspace 詳情使用，不作為 Catalog 的預設版型；沿用 panel 管理並保留原功能，不新增第二組常駐側欄。
 
 ```text
 ┌──────────────────────────────┬────────────────────────────┐

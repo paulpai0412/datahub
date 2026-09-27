@@ -89,6 +89,7 @@ function bridge(title, embedded = true) {
   });
   const cleanup = effect();
   return {
+    recognized: exports.isDataHubHostRequest({ method: "input", title }),
     responses,
     notices,
     sent,
@@ -206,6 +207,23 @@ test("standalone Task requests settle with an explicit missing-Host error", () =
   }
 });
 
+test("Grafana display and existing SQL inputs are recognized and use distinct Host channels", async () => {
+  for (const [title, type] of [
+    ["DataHub Grafana request", "datahub-grafana"],
+    ["DataHub SQL request", "datahub-sql"],
+  ]) {
+    const f = bridge(title);
+    try {
+      assert.equal(f.recognized, true);
+      await f.reply({ error: "fixture_denied" });
+      assert.equal(f.sent[0].type, type);
+      assert.equal(JSON.parse(f.responses[0].value).error, "fixture_denied");
+    } finally {
+      f.close();
+    }
+  }
+});
+
 test("Discovery uses its read-only Host channel and does not consume a Task Decision", async () => {
   const f = bridge("DataHub discovery request");
   try {
@@ -232,18 +250,26 @@ test("Discovery uses its read-only Host channel and does not consume a Task Deci
   }
 });
 
-test("Semantic uses its own read-only channel and fails outside the trusted parent", async () => {
-  const f = bridge("DataHub semantic request");
-  try {
-    await f.reply({ publicationAuthorized: false, changes: [] });
-    assert.equal(f.sent[0].type, "datahub-semantic");
-    assert.equal(f.responses.length, 1);
-  } finally { f.close(); }
-  const standalone = bridge("DataHub semantic request", false);
-  try {
-    assert.equal(JSON.parse(standalone.responses[0].value).error, "datahub_host_required");
-  } finally { standalone.close(); }
-});
+for (const kind of ["semantic", "catalog"])
+  test(`${kind} uses its own read-only channel and fails outside the trusted parent`, async () => {
+    const f = bridge(`DataHub ${kind} request`);
+    try {
+      await f.reply({ publicationAuthorized: false, changes: [] });
+      assert.equal(f.sent[0].type, `datahub-${kind}`);
+      assert.equal(f.responses.length, 1);
+    } finally {
+      f.close();
+    }
+    const standalone = bridge(`DataHub ${kind} request`, false);
+    try {
+      assert.equal(
+        JSON.parse(standalone.responses[0].value).error,
+        "datahub_host_required",
+      );
+    } finally {
+      standalone.close();
+    }
+  });
 
 test("ingestion keeps its existing unconfirmed-result and missing-host behavior", async () => {
   for (const embedded of [true, false]) {

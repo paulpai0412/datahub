@@ -1,0 +1,37 @@
+namespace com.ekop.agent
+
+import com.linkedin.common.Urn
+
+/** Private Semantic Task, stored only on ekopSemanticReview, never on dataJob.
+ * Requires native entity-type policies with explicitly authorized actors;
+ * this type has no ownership-based grant. Actor/tenant/scope must come from
+ * the trusted Host, not from a model or browser assertion. No searchable
+ * or relationship annotations: private context must not become public indexes
+ * or graph edges. Endpoint ACL isolation remains a required live check.
+ */
+@Aspect = { "name": "ekopSemanticTask" }
+record EkopSemanticTask {
+  @UrnValidation = { "entityTypes": [ "corpuser" ] }
+  actor: Urn
+
+  tenant: string
+
+  @UrnValidation = { "entityTypes": [ "aiAgent" ] }
+  agent: Urn
+
+  /** Approved source context, NOT an assertion that every asset was ingested
+   * by this source. SQL datasets retain their native ingestion proof; other
+   * selected assets bind their own identity, ACL, versions and relation evidence.
+   */
+  @UrnValidation = { "entityTypes": [ "dataHubIngestionSource" ] }
+  source: Urn
+
+  /** Exact existing Catalog selection. No prospective asset creation or SQL
+   * permission. Completeness is bounded by the selection, not the whole source.
+   */
+  @UrnValidation = { "entityTypes": [ "dataset", "container", "dataFlow", "dataJob", "chart", "dashboard" ] }
+  assets: array[Urn]
+
+  instructions: string
+  allowDecisions: boolean = true
+}

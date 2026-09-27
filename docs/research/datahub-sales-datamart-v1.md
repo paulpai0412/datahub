@@ -213,6 +213,29 @@ MSSQL commit、DataHub 發布與 Grafana 更新不是跨系統原子交易。分
 
 DataHub 原生頁面查 DataFlow／Job／Dataset／Chart／Dashboard、schema、lineage、glossary，連結 Grafana 真 dashboard。先驗原生導覽／完整關係查詢；必要時僅補既有 MFE 關係摘要，不另建圖譜 UI。
 
+### 7.1 Agent 自然語言查詢、SQL 與聊天圖卡（2026-09-24 歷史決策）
+
+> 一般使用者查詢以 [2026-09-26 Metadata 驅動方案](../design/datahub-agent-metadata-query.md) 為準：可見 metadata 即查詢授權，無額外逐人 SELECT 名單／逐次人工批准，DB 依連線帳號執行或拒絕。以下固定模板／共同來源批准屬原 SalesDatamart 試點，不再是一般產品範圍。ETL 寫入、可信 Join 業務核准及部署操作的原限制仍保留。
+
+**責任分工，不以安裝 skill 取代執行權限：** 目標 Actor 現有固定版 `grafana/skills` 的 `dashboarding`、`grafana-oss` 只提供 panel／變數／dashboard JSON、Grafana 操作與讀回指引；它們不是 SQL executor、DataHub 權限、經核准的 Join 或自動 dashboard 發布。新增／修改 Grafana 資產仍需目標與操作的精確核准、版本化 JSON、寫後原生讀回；Metadata reader 的 folder View 不自動取得 datasource query 權限。優先重用本案既有固定報表與 `datahub_catalog` 卡片接點，不另建微服務、狀態庫或通用查詢平台。
+
+```text
+/mfe/agent 使用者提問 → Agent 提取指標／維度／日期／filter 意圖
+  → Catalog 以目前 Actor 查資產／精確欄位／Chart／Dashboard 與來源版本
+  → 已審語義核對公式、grain、unit、aggregation、適用範圍／新鮮度
+  → 可信 Host 決定允許的模板／Join revision、重新授權並編譯／檢查最終 SQL
+  → 受控來源執行入口（本案例可選有界 Grafana datasource 查詢）
+  → Host 核對結果與資料範圍 → 專用 chat 結果卡＋Grafana 原生連結
+```
+
+Agent 可用 Catalog 與已核准 Semantic Steward 結果**提出查詢意圖、可見資產及 Join 候選**，但不能把自身產生的自由文字 SQL 或 Skill 範例直接交 Grafana／來源執行。Catalog lineage 是資料流，不是 Join；Semantic Steward 維護說明與治理，不自動生成可信可執行 metric／Join。最終可執行 SQL 由可信 Host 依已核准、版本固定的 metric／Join 契約及模板編譯（或嚴格核准），核對實際 SQL AST、方言、物件與欄位、Actor／tenant／來源 SELECT 權限、範圍與版本；沒有可信契約則只回傳候選／待驗證，不猜 Predicate。首例沿用 `reporting.v_sales_order_line` 的已審固定 panel SQL，對既有日期／區域／分類等參數做有界選擇；尚未驗證的跨表 Join 不進查詢。
+
+執行邊界歸 Host 所有，不要求 SQL 在 Agent 進程執行：可在核准的本案範圍透過 Grafana backend datasource 查詢，或使用受控來源入口。Grafana 不保證提交的 SQL 安全，Host 不能把 `/api/ds/query`、datasource UID 或任意 SQL 直接暴露給 Agent／瀏覽器；Grafana 端亦需本案限定、唯讀且僅可查 `reporting` 範圍的 DB 身分，並實測 Grafana org／folder／datasource 與使用者來源授權的交集。共用 Grafana SQL 帳號不代表逐使用者 SELECT／列級權限：首例只可用已核准的共同資料範圍；要跨入個別敏感資料，先具備逐人來源授權或經驗證的來源 RLS，否則拒絕。設定 timeout、來源並行、取消、結果筆數／大小、稽核與 UNKNOWN 對帳；30秒／每來源2並行只是待來源負責人確認的初始參考，不以 `SELECT` 開頭或 AST 成功冒充安全。憑證、敏感原始 SQL／literal 不進模型、普通 session、卡片或日誌。
+
+**呈現分兩段：** 先顯示經 Host 核過 Actor 可見的 metadata 卡（指標定義、URN、範圍、`as_of`、版本、可信狀態），用 operator 固定 Grafana origin 與經核准 UID／panel ID 組安全深連結；連結不等於查詢執行或數值驗證。再於受控 SQL 完成後以獨立 typed 工具結果卡顯示有界 KPI／圖表資料、分母／限制與原生 panel 對帳。卡片不得接受模型 HTML、任意 URL 或任意 dashboard JSON；reload／換 Actor／撤權時重新核權，敏感數值不得因持久化聊天歷史而繞過讀權。Grafana iframe 僅在獲准改嵌入政策、SSO/cookie、每位 viewer 的 Grafana ACL 與跨 origin 隔離實測後另行取捨；第一版不開 anonymous／公開 snapshot，不為了 iframe 放寬全域設定。
+
+本案例驗收：同一受審來源的真 `/mfe/agent` 問「按商品分類的每月銷售額」→ 顯示可核對的 DataHub term／Dataset／Chart URN 與粒度／期間 → Host 使用核准模板實際執行並和原生 Grafana panel 數值及來源聚合對帳 → 卡片與歷史正確讀回。分別驗未授權 Actor／資產、Grant 失效、來源 SELECT 不足、metric／schema／dashboard 版本漂移、未知 Join、逾時／取消／超量不得回假 PASS 或重播。此節為待實作契約，不追認目前已有一般 Agent SQL 查詢或可信 Join；見 `TODO-51730abb`、`TODO-a5722aab` 與真入口 `TODO-a064929f`。
+
 Agent 至少支援以下真問題並附可核對 URN／證據：
 
 - 此 DataFlow 的 Jobs、輸入、輸出及最近執行结果為何？

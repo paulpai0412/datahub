@@ -1,13 +1,21 @@
 # DataHub Agent 實作待辦 — 2026-09-12 重新核准
 
-母任務：`TODO-a2daa81d`。主代理獨作／安全自查，非獨立審查；不派子代理、不 commit／push。下列新業務閉環另由使用者明確核准原生 pi-goal-x；不以新 Goal 接管或結束舊母任務。
+> **2026-09-24 TODO 轉接**：原母任務 `TODO-a2daa81d` 已以 **superseded** 關閉；下方 T01–T07 是歷史驗證與原驗收清單，不表示剩餘功能完成或目前仍按舊任務推進。新首要任務為 `TODO-a064929f`（真 Agent 受控原生操作），交付基準為 `TODO-db4b9c85`（正式 downstream、乾淨建置及同源驗收）。其餘開放任務：`TODO-51730abb` 受控 SQL、`TODO-a5722aab` 可信 Join、`TODO-09b76307` DataFlow、`TODO-2a8a0cf6` Semantic、`TODO-dd8633ca` Catalog、`TODO-d7387d7f` Oracle／SQL Server。單一主代理為主；舊 Goal 不因轉接自動接管或續行。新 TODO 不延續既有部署、憑證、來源 SQL／metadata 寫入、政策或推送授權；重用有效收據，不重播已成功的操作。
+
+原母任務：`TODO-a2daa81d`。以下保留當時的主代理獨作／安全自查（非獨立審查）與業務閉環脈絡；有必要的獨立審查仍不可由自查替代。Agent 提出查詢意圖、可信 Host 編譯／核准 SQL 並執行、Grafana skill 僅作 dashboard 指引，以及聊天圖卡與 Join 的新分工，見 [SalesDatamart 設計 §7.1](research/datahub-sales-datamart-v1.md)；屬未完成的 `TODO-51730abb`／`TODO-a5722aab`，不是既有 T01–T05 已驗能力。
+
+## 2026-09-26 最新 SQL／Grafana 產品方向（取代固定案例限制）
+
+`TODO-51730abb` 沿 [Metadata 驅動查詢方案](design/datahub-agent-metadata-query.md) 開始實作：使用者可見的 DataHub metadata 即產品查詢授權；不另建逐人 SELECT 名單或逐次人工核准。實際 DB 以連線帳號拒絕無權查詢；Host 仍核 metadata 可見性與唯讀／資源限制。不限 SalesDatamart、六月或單一指標，所有可見 metadata 可用於自然語言脈絡，SQL 執行依各來源 adapter 真正支援的能力。不支援／未連線須清楚報告。
+
+固定 B／org2 真閉環已驗且測試 grant 已撤銷，見 [實測](verification/datahub-agent-grafana-b-live-20260926.md)；這不等於通用查询。本輪已實作同來源多表 Join、受保護連線 adapter、Pi 工具／UI／MFE／Host 全接線與動態 Grafana writer（私有 folder／原生讀回／淺色 portal）；不是僅交單表核心。合成完整接線已跑兩種不同查詢／圖型，見 [本地證據](verification/datahub-agent-metadata-query-local-20260926.md)。後續經核准已配置專用唯讀來源與 org2 writer／datasource 並切換 Agent；首題真 `/mfe/agent` 已完成三表 Join 與動態 Dashboard 發布，但 Infinity URL target 缺 `url_options.method` 導致前端拋錯，該輪停止且未重送 SQL。修正另獲核准並重載後，r2 兩題真三表 Join、bar/stat 與原生表格逐值對帳已通過；模型額外附表查詢被驗收 guard 擋下的兩筆紀錄保留。r3 已補清楚工具自帶同次結果表、經核准切換新 Pi 映像／assets，以相同原兩題且無成功次數攔截，完成各一次 SQL／Grafana、原生圖表及附表逐值對帳、零工具錯誤的自然收尾；後續[隔離真 MSSQL 生命週期](verification/datahub-agent-query-lifecycle-20260927.md)已驗 timeout／HTTP cancel、DB session 消失、並行名額及後續查詢恢復、不重跑；[結果邊界收尾](verification/datahub-agent-query-result-boundaries-20260927.md)也已通過 8 次隔離真 SQL 與原生 Infinity 解析，可見截斷標題經核准 Host-only 重載（PID2364312）生效；真模型 Stop 完整鏈、metadata 撤權與關係驗證／audit 等仍缺證據，本輪不再擴張；見[現場進展](verification/datahub-agent-metadata-query-native-20260926.md)，TODO 維持 open。下列 T01–T07、舊來源批准與 SalesDatamart 決策保留為歷史，不覆蓋本段最新產品方向；部署／外部操作授權不因產品設計自動擴張。
 
 ## 已核准的新業務閉環（2026-09-19盤點：多項已落地，整體未結案）
 
 使用者逐項核准 AdventureWorks 銷售星型模型、既有測試 MSSQL instance 的獨立 `SalesDatamart`、既有 Grafana 專用資產，以及單次執行／每次寫入人工核准。新增的是限定業務 Datamart database，不是 Extension 狀態庫；不授權新增其他 datastore／worker／scheduler 或修改 Core。這項限定例外補充下方既有「不另外建立 datastore」規則；來源仍唯讀。
 
 - [設計 v1](research/datahub-sales-datamart-v1.md)
-- [專用實作 TODO](datahub-sales-datamart-todo.md)，任務 `TODO-dc390fa8`（in_progress），原生 Goal `mtzxzwn6-1zw7vn`。
+- [專用實作 TODO](datahub-sales-datamart-todo.md)：原任務 `TODO-dc390fa8` 已作 superseded 關閉，剩餘交付由 `TODO-09b76307` 承接；`mtzxzwn6-1zw7vn` 為舊 Goal 證據，不代表目前進度。
 - 最新核准明確包含 **DataFlow Discovery（資料流探索）** Skill，ID `dataflow-discovery`；從程式碼／SQL／BI設定分析候選，再由Host驗證、人工核准發布。SalesDatamart是首個驗證案例，不hardcode產品或用手寫mapping替代分析。
 - 已建置SalesDatamart並真ETL載入／重跑／rollback；Grafana v2、兩庫隔離回復、13Dataset metadata／view lineage、Flow／三Job canary及真Agent唯讀Discovery已驗。完整欄位／治理發布及Agent固定ETL仍缺；詳[整案盤點](verification/datahub-progress-inventory-20260919.md)。T06／T07與母任務不追認完成，本版不加入排程；已確認環境／隱私不再重問。
 

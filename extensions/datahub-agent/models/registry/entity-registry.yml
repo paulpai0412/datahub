@@ -6,3 +6,11 @@ entities:
   - name: dataProcessInstance
     aspects:
       - ekopAgentRun
+  # New sensitive reviews use this type only. Loading a model does not isolate
+  # it: tested native policies must precede the first sensitive Aspect write.
+  - name: ekopSemanticReview
+    doc: Private Semantic Task and Run records; explicit actor type policy required.
+    keyAspect: ekopSemanticReviewKey
+    aspects:
+      - ekopSemanticTask
+      - ekopSemanticRun

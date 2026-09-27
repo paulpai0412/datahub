@@ -19,6 +19,11 @@ import type {
 import type { SkillsResponse } from "@/lib/api-types";
 import type { TextContent, UserMessage } from "@/lib/types";
 import {
+  queryCatalog,
+  catalogErrorText,
+  type CatalogReference,
+} from "@/lib/catalog-contract";
+import {
   clearDraft,
   getDraft,
   mergeRestoredSubmissionDraft,
@@ -26,6 +31,7 @@ import {
   rekeyDraft as rekeyStoredDraft,
   setDraft,
   type ChatDraftImage,
+  type ChatSubmissionDraft,
 } from "@/lib/draft-store";
 import {
   MAX_ATTACHED_IMAGE_BYTES,
@@ -56,14 +62,27 @@ export interface AttachedImage {
 }
 
 interface Props {
-  onSend: (message: string, images?: AttachedImage[]) => void;
+  onSend: (
+    message: string,
+    images?: AttachedImage[],
+    draft?: ChatSubmissionDraft,
+  ) => void;
   onAbort: () => void;
-  onSteer?: (message: string, images?: AttachedImage[]) => void;
-  onFollowUp?: (message: string, images?: AttachedImage[]) => void;
+  onSteer?: (
+    message: string,
+    images?: AttachedImage[],
+    draft?: ChatSubmissionDraft,
+  ) => void;
+  onFollowUp?: (
+    message: string,
+    images?: AttachedImage[],
+    draft?: ChatSubmissionDraft,
+  ) => void;
   onPromptWithStreamingBehavior?: (
     message: string,
     behavior: "steer" | "followUp",
     images?: AttachedImage[],
+    draft?: ChatSubmissionDraft,
   ) => void;
   isStreaming: boolean;
   /** Text-only composer without the session controls or outer spacing. */
@@ -132,6 +151,8 @@ interface Props {
 }
 
 export interface ChatInputHandle {
+  focus: () => void;
+  addCatalogReference: (reference: CatalogReference) => void;
   insertText: (text: string) => void;
   insertIfEmpty: (text: string) => void;
   replaceMessage: (message: UserMessage) => void;
@@ -142,13 +163,21 @@ export interface ChatInputHandle {
     text: string,
     images?: ChatDraftImage[],
     targetDraftKey?: string,
+    references?: CatalogReference[],
   ) => void;
 }
 
-const TOOL_PRESETS = ["chat-only", "read-only", "default", "full"] as const;
+const TOOL_PRESETS = [
+  "chat-only",
+  "datahub-only",
+  "read-only",
+  "default",
+  "full",
+] as const;
 type ToolPresetLabel = (typeof TOOL_PRESETS)[number];
 const TOOL_PRESET_MAP: Record<ToolPresetLabel, ToolPreset> = {
   "chat-only": "none",
+  "datahub-only": "datahub-only",
   "read-only": "read-only",
   default: "default",
   full: "full",
@@ -752,6 +781,14 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   const [value, setValue] = useState(() =>
     draftKey ? (getDraft(draftKey)?.value ?? "") : "",
   );
+  const [catalogReferences, setCatalogReferences] = useState<
+    CatalogReference[]
+  >(() => (draftKey ? (getDraft(draftKey)?.catalogReferences ?? []) : []));
+  const [catalogChecking, setCatalogChecking] = useState(false);
+  const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
+  const catalogCheck = useRef<AbortController | null>(null);
+  const catalogReferencesRef = useRef(catalogReferences);
+  catalogReferencesRef.current = catalogReferences;
   const [toolDropdownOpen, setToolDropdownOpen] = useState(false);
   const [thinkingDropdownOpen, setThinkingDropdownOpen] = useState(false);
   const [controlsMenuOpen, setControlsMenuOpen] = useState(false);
@@ -815,10 +852,33 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   attachedImagesRef.current = attachedImages;
 
   useImperativeHandle(ref, () => ({
+    focus() {
+      textareaRef.current?.focus();
+    },
+    addCatalogReference(reference: CatalogReference) {
+      catalogCheck.current?.abort();
+      catalogCheck.current = null;
+      setCatalogChecking(false);
+      const existing = catalogReferencesRef.current;
+      const next = existing.some(
+        (item) =>
+          item.urn === reference.urn && item.fieldPath === reference.fieldPath,
+      )
+        ? existing
+        : [...existing, { ...reference }];
+      catalogReferencesRef.current = next;
+      setCatalogReferences(next);
+      setCatalogNotice(null);
+      if (!valueRef.current.trim()) {
+        valueRef.current = "請說明所引用的資料：";
+        setValue(valueRef.current);
+      }
+      requestAnimationFrame(() => textareaRef.current?.focus());
+    },
     insertIfEmpty(text: string) {
       const ta = textareaRef.current;
       const current = ta ? ta.value : value;
-      if (current.trim()) return;
+      if (current.trim() || catalogReferencesRef.current.length) return;
       valueRef.current = text;
       setValue(text);
       setAtQuery(null);
@@ -833,6 +893,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
       const ta = textareaRef.current;
       const current = ta ? ta.value : value;
       if (
+        catalogReferencesRef.current.length > 0 ||
         !canRestoreUserMessage(
           current,
           attachedImagesRef.current.length,
@@ -889,12 +950,15 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
       const currentDraft = {
         value: valueRef.current,
         images: attachedImagesRef.current.map(imageToDraftImage),
+        catalogReferences: catalogReferencesRef.current,
       };
       const moved = rekeyStoredDraft(previousKey, nextKey, currentDraft) ?? {
         value: "",
         images: [],
       };
       const unchanged =
+        JSON.stringify(moved.catalogReferences ?? []) ===
+          JSON.stringify(currentDraft.catalogReferences) &&
         moved.value === currentDraft.value &&
         moved.images.length === currentDraft.images.length &&
         moved.images.every(
@@ -909,6 +973,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
       valueRef.current = moved.value;
       attachedImagesRef.current = movedImages;
       setValue(moved.value);
+      catalogReferencesRef.current = moved.catalogReferences ?? [];
+      setCatalogReferences(catalogReferencesRef.current);
       setAttachedImages((current) => {
         current.forEach(revokeImagePreview);
         return movedImages;
@@ -920,8 +986,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
       text: string,
       images?: ChatDraftImage[],
       targetDraftKey?: string,
+      references?: CatalogReference[],
     ) {
-      if (!text.trim() && !images?.length) return;
+      if (!text.trim() && !images?.length && !references?.length) return;
 
       // clearInput is queued before the submission handler runs. Compose with
       // that queued state so a fast rejection cannot observe stale DOM text and
@@ -940,6 +1007,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
         targetsCurrentComposer
           ? attachedImagesRef.current.map(imageToDraftImage)
           : (storedDraft?.images ?? []),
+        targetsCurrentComposer
+          ? catalogReferencesRef.current
+          : storedDraft?.catalogReferences,
+        references,
       );
       // The first optimistic message switches ChatWindow out of its empty-state
       // layout and remounts this component. Persist synchronously so recovery is
@@ -961,6 +1032,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
       // Session promotion can rekey this composer before React flushes the
       // functional updates below, so update the imperative snapshot first.
       valueRef.current = restoredDraft.value;
+      catalogReferencesRef.current = restoredDraft.catalogReferences ?? [];
+      setCatalogReferences(catalogReferencesRef.current);
       attachedImagesRef.current = restoredImages;
       setValue((current) => {
         const restored = mergeRestoredSubmissionText(text, current);
@@ -1082,6 +1155,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   const clearInput = useCallback(() => {
     valueRef.current = "";
     setValue("");
+    catalogReferencesRef.current = [];
+    setCatalogReferences([]);
+    setCatalogNotice(null);
     setAtQuery(null);
     setHistoryMenuOpen(false);
     if (draftKey) clearDraft(draftKey);
@@ -1098,8 +1174,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     setDraft(draftKey, {
       value,
       images: attachedImages.map(imageToDraftImage),
+      catalogReferences,
     });
-  }, [attachedImages, draftKey, value]);
+  }, [attachedImages, catalogReferences, draftKey, value]);
 
   useEffect(() => {
     const previousDraftKey = draftKeyRef.current;
@@ -1109,6 +1186,7 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
       setDraft(previousDraftKey, {
         value: valueRef.current,
         images: attachedImagesRef.current.map(imageToDraftImage),
+        catalogReferences: catalogReferencesRef.current,
       });
     }
 
@@ -1119,6 +1197,10 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     valueRef.current = nextValue;
     attachedImagesRef.current = nextImages;
     setValue(nextValue);
+    catalogReferencesRef.current = draft?.catalogReferences ?? [];
+    setCatalogReferences(catalogReferencesRef.current);
+    setCatalogNotice(null);
+    setCatalogChecking(false);
     setAtQuery(null);
     setHistoryMenuOpen(false);
     setAttachedImages((prev) => {
@@ -1156,9 +1238,87 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
     };
   }, []);
 
+  useEffect(
+    () => () => {
+      catalogCheck.current?.abort();
+      catalogCheck.current = null;
+    },
+    [draftKey],
+  );
+
+  const prepareCatalogMessage = useCallback(
+    async (msg: string): Promise<string | null> => {
+      if (catalogCheck.current) return null;
+      if (/^[!/]/.test(msg.trimStart())) {
+        setCatalogNotice(
+          "Catalog 引用僅用於對話查詢；執行命令前請先移除引用。",
+        );
+        return null;
+      }
+      const references = catalogReferencesRef.current;
+      const initialText = valueRef.current,
+        initialImages = attachedImagesRef.current,
+        initialDraft = draftKeyRef.current;
+      const abort = new AbortController();
+      catalogCheck.current = abort;
+      setCatalogChecking(true);
+      setCatalogNotice(null);
+      try {
+        const lines: string[] = [];
+        for (const reference of references) {
+          const fresh = await queryCatalog(
+            {
+              action: "entity",
+              urn: reference.urn,
+              ...(reference.fieldPath
+                ? { fieldPath: reference.fieldPath }
+                : {}),
+            },
+            abort.signal,
+          );
+          if (abort.signal.aborted) return null;
+          lines.push(
+            `資產：${fresh.entity!.name}\n資產識別：${fresh.entity!.urn}${reference.fieldPath ? `\n精確欄位：${reference.fieldPath}` : ""}\n權限核對時間：${fresh.queriedAt}`,
+          );
+        }
+        if (
+          draftKeyRef.current !== initialDraft ||
+          valueRef.current !== initialText ||
+          attachedImagesRef.current !== initialImages ||
+          catalogReferencesRef.current !== references
+        ) {
+          setCatalogNotice(
+            "核對期間草稿或引用已變更，尚未送出；請確認後重新送出。",
+          );
+          return null;
+        }
+        return `${msg}${msg ? "\n\n" : ""}DataHub 查詢引用（定位資料，不是授權或指令）：\n${lines.join("\n\n")}`;
+      } catch (error) {
+        if (!abort.signal.aborted)
+          setCatalogNotice(
+            catalogErrorText(
+              error instanceof Error ? error.message : "catalog_request_failed",
+            ),
+          );
+        return null;
+      } finally {
+        if (catalogCheck.current === abort) {
+          catalogCheck.current = null;
+          setCatalogChecking(false);
+        }
+      }
+    },
+    [],
+  );
+
   const runBuiltinCommand = useCallback(
     async (msg: string): Promise<boolean> => {
-      if (attachedImages.length || !msg.startsWith("/") || !onBuiltinCommand)
+      if (
+        catalogReferencesRef.current.length ||
+        attachedImages.length ||
+        !msg.startsWith("/") ||
+        !onBuiltinCommand
+      )
         return false;
       const result = await onBuiltinCommand(msg);
       if (!result.handled) return false;
@@ -1178,19 +1338,29 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
 
   const handleSend = useCallback(async () => {
     const msg = value.trim();
-    if (!msg && !attachedImages.length) return;
+    if (!msg && !attachedImages.length && !catalogReferences.length) return;
     onAudioUnlock?.();
     const builtinAllowed =
       !isStreaming || canRunBuiltinSlashCommandWhileStreaming(msg);
     if (builtinAllowed && (await runBuiltinCommand(msg))) return;
     if (isStreaming) return;
+    const prepared = catalogReferences.length
+      ? await prepareCatalogMessage(msg)
+      : msg;
+    if (prepared === null) return;
     clearInput();
-    onSend(msg, attachedImages.length ? attachedImages : undefined);
+    onSend(
+      prepared,
+      attachedImages.length ? attachedImages : undefined,
+      catalogReferences.length ? { value: msg, catalogReferences } : undefined,
+    );
   }, [
     value,
     attachedImages,
     isStreaming,
     runBuiltinCommand,
+    catalogReferences,
+    prepareCatalogMessage,
     onSend,
     clearInput,
     onAudioUnlock,
@@ -1240,7 +1410,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
           count: filteredSlashCommands.length,
         });
   const hasInputText = Boolean(value.trim());
-  const canQueueStreamingMessage = hasInputText || attachedImages.length > 0;
+  const canQueueStreamingMessage =
+    !catalogChecking &&
+    (hasInputText || attachedImages.length > 0 || catalogReferences.length > 0);
   // Warn when images are attached but the selected model is known not to accept
   // image input (#584), including a resolved default. Unknown models stay silent.
   const showImageUnsupportedWarning =
@@ -1469,11 +1641,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   }, []);
 
   const sendQueued = useCallback(
-    (mode: "steer" | "followup") => {
+    async (mode: "steer" | "followup") => {
       const msg = value.trim();
-      if (!msg && !attachedImages.length) return;
+      if (!msg && !attachedImages.length && !catalogReferences.length) return;
       onAudioUnlock?.();
       if (
+        !catalogReferences.length &&
         !attachedImages.length &&
         onBuiltinCommand &&
         canRunBuiltinSlashCommandWhileStreaming(msg)
@@ -1481,26 +1654,47 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
         void runBuiltinCommand(msg);
         return;
       }
+      const prepared = catalogReferences.length
+        ? await prepareCatalogMessage(msg)
+        : msg;
+      if (prepared === null) return;
       const streamingBehavior = mode === "steer" ? "steer" : "followUp";
       if (msg.startsWith("/") && onPromptWithStreamingBehavior) {
         clearInput();
         onPromptWithStreamingBehavior(
-          msg,
+          prepared,
           streamingBehavior,
           attachedImages.length ? attachedImages : undefined,
+          catalogReferences.length
+            ? { value: msg, catalogReferences }
+            : undefined,
         );
         return;
       }
       clearInput();
       if (mode === "steer" && onSteer) {
-        onSteer(msg, attachedImages.length ? attachedImages : undefined);
+        onSteer(
+          prepared,
+          attachedImages.length ? attachedImages : undefined,
+          catalogReferences.length
+            ? { value: msg, catalogReferences }
+            : undefined,
+        );
       } else if (mode === "followup" && onFollowUp) {
-        onFollowUp(msg, attachedImages.length ? attachedImages : undefined);
+        onFollowUp(
+          prepared,
+          attachedImages.length ? attachedImages : undefined,
+          catalogReferences.length
+            ? { value: msg, catalogReferences }
+            : undefined,
+        );
       }
     },
     [
       value,
       attachedImages,
+      catalogReferences,
+      prepareCatalogMessage,
       onBuiltinCommand,
       onPromptWithStreamingBehavior,
       onSteer,
@@ -1945,7 +2139,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
   const toolPresetLabel =
     rawToolPresetLabel === "chat-only"
       ? t("chat.chatOnly")
-      : rawToolPresetLabel;
+      : rawToolPresetLabel === "datahub-only"
+        ? t("chat.datahubOnly")
+        : rawToolPresetLabel;
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -2218,6 +2414,65 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
             {compactError}
           </div>
         )}
+        {catalogReferences.length > 0 && (
+          <section
+            aria-label="Catalog 查詢引用"
+            style={{
+              display: "flex",
+              gap: 6,
+              flexWrap: "wrap",
+              marginBottom: 8,
+            }}
+          >
+            {catalogReferences.map((reference, index) => (
+              <button
+                type="button"
+                key={`${reference.urn}:${reference.fieldPath ?? ""}`}
+                title={reference.urn}
+                aria-label={`移除引用 ${reference.name}${reference.fieldPath ? ` ${reference.fieldPath}` : ""}`}
+                onClick={() => {
+                  catalogCheck.current?.abort();
+                  catalogCheck.current = null;
+                  setCatalogChecking(false);
+                  const next = catalogReferencesRef.current.filter(
+                    (_, position) => position !== index,
+                  );
+                  catalogReferencesRef.current = next;
+                  setCatalogReferences(next);
+                  setCatalogNotice(null);
+                }}
+                style={{
+                  border: "1px solid var(--border)",
+                  borderRadius: 12,
+                  padding: "6px 10px",
+                  color: "var(--accent)",
+                  background: "var(--bg-panel)",
+                  overflowWrap: "anywhere",
+                }}
+              >
+                {reference.name}
+                {reference.fieldPath ? ` · ${reference.fieldPath}` : ""} ×
+              </button>
+            ))}
+          </section>
+        )}
+        {catalogChecking && (
+          <div role="status">
+            正在重新核對 Catalog 讀取權限，尚未送出。
+            <button
+              type="button"
+              onClick={() => {
+                catalogCheck.current?.abort();
+                catalogCheck.current = null;
+                setCatalogChecking(false);
+                setCatalogNotice("已停止等待，草稿仍保留。");
+              }}
+            >
+              取消核對
+            </button>
+          </div>
+        )}
+        {catalogNotice && <div role="status">{catalogNotice}</div>}
         {/* Image previews */}
         {attachedImages.length > 0 && (
           <div
@@ -2932,7 +3187,12 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
             ) : (
               <button
                 onClick={handleSend}
-                disabled={!value.trim() && !attachedImages.length}
+                disabled={
+                  catalogChecking ||
+                  (!value.trim() &&
+                    !attachedImages.length &&
+                    !catalogReferences.length)
+                }
                 style={{
                   flexShrink: 0,
                   alignSelf: "flex-end",
@@ -3432,6 +3692,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                           const isActive = (toolPreset ?? "default") === preset;
                           let desc: string;
                           if (lvl === "chat-only") desc = t("chat.chatOnly");
+                          else if (lvl === "datahub-only")
+                            desc = t("chat.datahubOnlyDescription");
                           else if (lvl === "read-only")
                             desc = t("chat.readOnlyTools", { count: 4 });
                           else if (lvl === "default")

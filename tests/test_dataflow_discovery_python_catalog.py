@@ -6,8 +6,8 @@ import unittest
 
 from datahub.metadata.schema_classes import SchemaMetadataClass
 from dataflow_discovery.catalog import CatalogBindingError, bind_sql_dependencies
-from dataflow_discovery.host import capture_and_analyze
-from dataflow_discovery.python_catalog import bind_python_sql_dependencies
+from dataflow_discovery.host import capture_and_analyze, capture_workspace_and_analyze
+from dataflow_discovery.python_catalog import bind_python_sql_dependencies, describe_python_connections
 from tests.test_dataflow_discovery_catalog import Reader, schema, scope, urn
 
 PROGRAM = '''from sqlalchemy import text
@@ -151,6 +151,23 @@ class PythonCatalogTests(unittest.TestCase):
         self.assertEqual(result["contexts"][0]["status"], "CATALOG_BOUND")
         self.assertEqual(result["contexts"][1]["bindings"][0]["reason"], "database_outside_host_scope")
         self.assertEqual(len(reader.calls), 3)
+
+    def test_checked_in_datamart_etl_connection_trace_has_no_deferred_gaps(self):
+        # A source edit must not silently make the full field-lineage entrypoint
+        # untraceable; no Catalog access or runtime source connection is made.
+        root = Path(__file__).resolve().parents[1]
+        receipt, _ = capture_workspace_and_analyze(
+            str(root), "extensions/sales-datamart", source_id="sales-datamart-static-test"
+        )
+        description = describe_python_connections(
+            receipt.analysis, receipt.snapshot,
+            path="extensions/sales-datamart/src/sales_datamart/etl.py", entrypoint="run_etl",
+        )
+        self.assertGreater(description["context_count"], 0)
+        self.assertEqual({item["label"] for item in description["connections"]}, {"source", "target"})
+        self.assertEqual(description["unresolved"], [])
+        self.assertEqual(description["trace_findings"], [])
+        self.assertFalse(description["runtime_identity_verified"])
 
     def test_trace_gaps_and_empty_trace_do_not_claim_complete_catalog_binding(self):
         # A reached deferred helper is a gap, unlike merely uncalled code.

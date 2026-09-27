@@ -1,15 +1,26 @@
 # T06 Task／Decision 的最小官方模型擴充
 
-## Semantic Steward 本地候選 0.1.8
+## 私密 Semantic 本地候選 0.1.9：模型檢查通過，尚未部署
 
-本工作樹 `toolchain.lock.json`／`build.gradle` 的目前來源版本為 **0.1.8**。增加三個 optional string：publication review 的 `semanticContextJson`、change 的 `beforeValueJson`、attempt 的 `outcomeJson`。它們沿用既有 Task／Run／Decision，不新增 Entity／store；舊記錄不會因缺欄位被當成已批准或已成功。
+目前 `toolchain.lock.json`／`build.gradle` 的來源版本為 **0.1.9**。新增 `ekopSemanticReview` Entity、opaque key、含 tenant／六類 Catalog assets 的私密 Task／Run，以及 publication review 的 optional `assets`。舊 Dataset scope 型別限制不變，不新增 datastore，也不把非 Dataset 當 ingestion Dataset。
+
+初版候選在官方 loader 報 `Aspect ownership does not exist`：固定版 custom factory 排除 Core classes，不能直接重用 ownership／status。保留原失敗與診斷後，使用者明確核准改採**專屬型別＋指定 `datahub` 的原生 actor policy，保留管理員權限**，不依賴 ownership 自動授權。新候選已移除兩項 Core Aspect 註冊，沒有修改 Core 或重定義標準 Aspect。未來更換審核者須明確調整 native policy。
+
+目前 **Pegasus、新舊模型 roundtrip、官方 Patch／MergedEntityRegistry 載入及 0.1.8→0.1.9 相容性檢查全通過**。這只證明模型契約；原生 API、actor／非 actor／管理員隔離與全域政策影響尚未實測，不能據此寫入敏感審核。
+
+新增 `privateModelCheck`／`privateRegistryCheck` 已納入 `check`。後者以 test classes＋固定 Core jars 為 classpath，分別從版本 ZIP 載入插件，避免把新 schema 與自己比較；可傳 `-PpreviousModel=/path/to/ekop-agent-tasks-0.1.8.zip` 驗歷史版本。實測確認先前 artifact 的 schema 沒有 `assets`，新 schema 為 optional，完整 merge 通過；舊 reader 會忽略新欄位，不代表舊 Host 能處理新 Catalog 發布。
+
+沒有接線新的 Host writer 或改動現場模型／政策。證據及下一步決策：[私密模型本地驗證](../../../docs/verification/datahub-semantic-private-model-local-20260927.md)。新模型欄位不代表功能、ACL 或發布完成。
+
+## Semantic Steward 0.1.8 歷史
+
+0.1.8 增加三個 optional string：publication review 的 `semanticContextJson`、change 的 `beforeValueJson`、attempt 的 `outcomeJson`。它們沿用既有 Task／Run／Decision，不新增 Entity／store；舊記錄不會因缺欄位被當成已批准或已成功。
 
 0.1.8 已使用固定官方 Core jars、既有 checksum 驗證依賴，在 credential-free／network-none 容器以 Gradle offline 建置並通過 Pegasus roundtrip／annotation 檢查；產物留在工作樹 `.local/evidence/semantic-steward/s3/model-build/`。**未部署**。不得把新欄位送到未載入相容模型的 GMS，不覆寫舊 release 或以刪除歷史回滾。
 
 既有實測 Task／Run 可由其他 Catalog Reader 讀取，並非 actor 私有區。Steward operator policy 必須明列 `semanticAuditAudience: EXISTING_TASK_RUN_ACL` 才能準備提案；這是對既有可見範圍的明確確認，不會自動變更 Policy 或縮限 Native API。若需更窄的讀者範圍，先以官方 Policy 配置並驗證；不得僅依 Host owner check 宣稱底層記錄已隔離。記錄禁止憑證；完整 before／after 也只可涵蓋已批准落入該原生 ACL 的 metadata。
 
 目前 S3 接線與證據見 [Semantic Steward S3](../../../docs/verification/datahub-semantic-steward-s3.md)。**以下 0.1.0–0.1.3 部分是當時記錄，不代表目前線上版本；本輪沒有讀取或切換線上 registry。**
-
 
 使用 DataHub v1.7.0.1 的官方 `metadata-models-custom` 產物格式及 model registry loader；不修改 Core，不新增 Entity 或 datastore。
 

@@ -6,11 +6,15 @@ import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import {
   discoveryPolicies,
+  assertWorkspaceAdoption,
+  prepareWorkspacePublication,
   nativeDiscovery,
   analyzeDiscovery,
   compileDiscoveryPublication,
   discoveryPublicationCompiler,
   preserveDiscoveryJobIO,
+  readDiscoveryCatalog,
+  readWorkspaceBiCatalog,
 } from "../extensions/datahub-agent/integration/native-discovery.mjs";
 import {
   makePublicationReview,
@@ -364,6 +368,354 @@ test("existing analyze intent invokes fresh Host Catalog and real isolated field
   assert.equal(next.candidateDigest, page.candidateDigest);
   assert.equal(next.candidates[0].kind, "sql_context");
   assert.equal(f.calls.length, 8); // no cross-page Catalog cache
+});
+
+test("workspace publication refuses an unbound identity before native reads", async () => {
+  let calls = 0;
+  await assert.rejects(
+    prepareWorkspacePublication(
+      { sourceId: "case", workspace: true, catalogScopes: {} },
+      { connections: {} },
+      undefined,
+      {
+        fetchImpl() {
+          calls++;
+          throw Error("unexpected native request");
+        },
+      },
+    ),
+    /workspace_identity_policy_required/,
+  );
+  assert.equal(calls, 0);
+});
+
+test("adoption requires every existing native key, info, I/O and matching source ownership", () => {
+  const flow = "urn:li:dataFlow:(python,existing_etl,PROD)";
+  const job = `urn:li:dataJob:(${flow},load)`;
+  const policy = {
+    sourceId: "case",
+    adoption: {
+      snapshotSha256: "a".repeat(64),
+      flowUrn: flow,
+      jobs: { load: job },
+      nativeVersions: {
+        [flow]: { dataFlowKey: "1", dataFlowInfo: "1" },
+        [job]: { dataJobKey: "1", dataJobInfo: "1", dataJobInputOutput: "1" },
+      },
+      relatedCatalogUrns: [],
+    },
+  };
+  const compiled = {
+    flowUrn: flow,
+    snapshotSha256: "a".repeat(64),
+    jobUrns: { load: job },
+    aspects: [
+      { urn: flow, aspect: "dataFlowInfo" },
+      { urn: job, aspect: "dataJobInfo" },
+      { urn: job, aspect: "dataJobInputOutput" },
+    ],
+  };
+  const aspect = (value) => ({ value, systemMetadata: { version: "1" } });
+  const observed = new Map([
+    [
+      flow,
+      {
+        dataFlowKey: aspect({}),
+        dataFlowInfo: aspect({
+          customProperties: { "discovery.sourceId": "case" },
+        }),
+      },
+    ],
+    [
+      job,
+      {
+        dataJobKey: aspect({}),
+        dataJobInfo: aspect({
+          customProperties: { "discovery.sourceId": "case" },
+        }),
+        dataJobInputOutput: aspect({ inputDatasets: [] }),
+      },
+    ],
+  ]);
+  assert.doesNotThrow(() =>
+    assertWorkspaceAdoption(policy, compiled, observed),
+  );
+  const rejects = (candidate, native = observed) =>
+    assert.throws(
+      () => assertWorkspaceAdoption(policy, candidate, native),
+      /workspace_adoption_conflict/,
+    );
+  rejects({ ...compiled, snapshotSha256: "b".repeat(64) });
+  rejects({
+    ...compiled,
+    jobUrns: {
+      extra: "urn:li:dataJob:(urn:li:dataFlow:(python,other,PROD),extra)",
+    },
+  });
+  rejects({
+    ...compiled,
+    aspects: [
+      ...compiled.aspects,
+      {
+        urn: "urn:li:dataJob:(urn:li:dataFlow:(python,other,PROD),extra)",
+        aspect: "dataJobInfo",
+      },
+    ],
+  });
+  rejects(compiled, new Map([[flow, observed.get(flow)]]));
+  rejects(
+    compiled,
+    new Map([
+      [flow, observed.get(flow)],
+      [
+        job,
+        {
+          ...observed.get(job),
+          dataJobInfo: aspect({ customProperties: {} }),
+        },
+      ],
+    ]),
+  );
+  rejects(
+    compiled,
+    new Map([
+      [flow, observed.get(flow)],
+      [job, { ...observed.get(job), dataJobInputOutput: undefined }],
+    ]),
+  );
+  rejects(
+    compiled,
+    new Map([
+      [flow, observed.get(flow)],
+      [
+        job,
+        {
+          ...observed.get(job),
+          dataJobInfo: aspect({
+            customProperties: { "discovery.sourceId": "another" },
+          }),
+        },
+      ],
+    ]),
+  );
+  rejects(
+    compiled,
+    new Map([
+      [flow, observed.get(flow)],
+      [
+        job,
+        {
+          ...observed.get(job),
+          dataJobKey: { value: {}, systemMetadata: { version: "0" } },
+        },
+      ],
+    ]),
+  );
+});
+
+test("workspace adoption is operator-owned, exact-source and same-flow only", () => {
+  const flow = "urn:li:dataFlow:(python,existing_etl,PROD)";
+  const base = {
+    sourceId: "case",
+    root: "/tmp/dataflow-workspace",
+    workspace: true,
+    modelContextApproved: true,
+    catalogScopes: {
+      target: {
+        database: "SalesDatamart",
+        default_schema: "dm",
+        env: "PROD",
+        lowercase_urns: true,
+        lowercase_fields: true,
+        allowed_dataset_urns: [
+          "urn:li:dataset:(urn:li:dataPlatform:mssql,SalesDatamart.dm.fact,PROD)",
+        ],
+      },
+    },
+    adoption: {
+      snapshotSha256: "a".repeat(64),
+      flowUrn: flow,
+      jobs: { load: `urn:li:dataJob:(${flow},load)` },
+      nativeVersions: {
+        [flow]: { dataFlowKey: "1", dataFlowInfo: "1" },
+        [`urn:li:dataJob:(${flow},load)`]: {
+          dataJobKey: "1",
+          dataJobInfo: "1",
+          dataJobInputOutput: "2",
+        },
+      },
+      evidenceOnly: ["extract"],
+      relatedCatalogUrns: [
+        "urn:li:dataset:(urn:li:dataPlatform:grafana,case.panel.1,PROD)",
+      ],
+    },
+  };
+  const [accepted] = discoveryPolicies({ [actor.key]: [base] }).get(actor.key);
+  assert.equal(accepted.adoption.jobs.load, base.adoption.jobs.load);
+  assert.equal(Object.isFrozen(accepted.adoption.jobs), true);
+  for (const bad of [
+    { ...base.adoption, snapshotSha256: "invalid" },
+    { ...base.adoption, flowUrn: "urn:li:dataFlow:(python,other,DEV)" },
+    {
+      ...base.adoption,
+      jobs: {
+        load: `urn:li:dataJob:(urn:li:dataFlow:(python,other,PROD),load)`,
+      },
+    },
+    { ...base.adoption, evidenceOnly: ["load"] },
+    { ...base.adoption, evidenceOnly: ["extract", "extract"] },
+    { ...base.adoption, relatedCatalogUrns: ["urn:li:dataset:unrelated"] },
+    {
+      ...base.adoption,
+      relatedCatalogUrns: [
+        base.adoption.relatedCatalogUrns[0],
+        base.adoption.relatedCatalogUrns[0],
+      ],
+    },
+    { ...base.adoption, jobs: { load: "urn:li:dataJob:(other,load)" } },
+    {
+      ...base.adoption,
+      nativeVersions: { [flow]: { dataFlowKey: "1", dataFlowInfo: "1" } },
+    },
+    {
+      ...base.adoption,
+      nativeVersions: {
+        ...base.adoption.nativeVersions,
+        [flow]: { dataFlowKey: "0", dataFlowInfo: "1" },
+      },
+    },
+  ]) {
+    assert.throws(
+      () => discoveryPolicies({ [actor.key]: [{ ...base, adoption: bad }] }),
+      /invalid_discovery_policy/,
+    );
+  }
+});
+
+test("fresh Catalog checks do not share an expired request timeout", async (t) => {
+  const f = await fixture(t);
+  const originalTimeout = AbortSignal.timeout;
+  let firstController;
+  let signalCount = 0;
+  AbortSignal.timeout = () => {
+    const controller = new AbortController();
+    if (++signalCount === 1) firstController = controller;
+    return controller.signal;
+  };
+  try {
+    const fetchImpl = f.options.fetchImpl;
+    const catalog = await readDiscoveryCatalog(f.policy, {
+      ...f.options,
+      async fetchImpl(url, init) {
+        // The first response has completed, but its request budget has expired
+        // by the time the next sequential ACL request begins.
+        if (f.calls.length === 1) firstController.abort();
+        if (init.signal.aborted) throw Error("expired previous request");
+        return fetchImpl(url, init);
+      },
+    });
+    assert.deepEqual(Object.keys(catalog), Object.keys(f.catalog));
+    assert.equal(f.calls.length, 4); // actor / grant / batch / actor
+    assert.equal(signalCount, f.calls.length);
+  } finally {
+    AbortSignal.timeout = originalTimeout;
+  }
+});
+
+test("malformed native BI response is a bounded Catalog rejection", async () => {
+  await assert.rejects(
+    readWorkspaceBiCatalog(
+      [{ kind: "panel", dashboardUid: "one", datasourceUid: "two", id: 1 }],
+      {
+        actor,
+        frontendOrigin: "http://fixture.invalid",
+        cookieHeader: "PLAY_SESSION=fixture; actor=urn:li:corpuser:fixture",
+        assertActive() {},
+        async fetchImpl() {
+          return new Response("malformed body");
+        },
+      },
+    ),
+    /workspace_bi_catalog_rejected/,
+  );
+});
+
+test("operator-pinned BI URNs read only exact assets and reject unrelated native values", async () => {
+  const urn = "urn:li:dataset:(urn:li:dataPlatform:grafana,case.panel.1,PROD)";
+  const requests = [
+    { kind: "panel", dashboardUid: "d", datasourceUid: "s", id: 1 },
+  ];
+  const calls = [];
+  let changed = false;
+  const context = {
+    actor,
+    frontendOrigin: "http://fixture.invalid",
+    cookieHeader: "PLAY_SESSION=fixture; actor=urn:li:corpuser:fixture",
+    assertActive() {},
+    async fetchImpl(url, init) {
+      calls.push(url.pathname);
+      const body = JSON.parse(init.body);
+      if (url.pathname === "/api/v2/graphql") {
+        assert.ok(body.query.includes("getGrantedPrivileges"));
+        assert.equal(body.variables.input.resourceSpec.resourceUrn, urn);
+        return Response.json({
+          data: { getGrantedPrivileges: { privileges: ["GET_ENTITY"] } },
+        });
+      }
+      assert.equal(url.pathname, "/openapi/v3/entity/dataset/batchGet");
+      assert.deepEqual(
+        body.map((item) => item.urn),
+        [urn],
+      );
+      const names = [
+        "datasetProperties",
+        "schemaMetadata",
+        "upstreamLineage",
+        "viewProperties",
+        "status",
+      ];
+      assert.deepEqual(Object.keys(body[0]).sort(), ["urn", ...names].sort());
+      return Response.json([
+        {
+          urn,
+          ...Object.fromEntries(
+            names.map((name) => [
+              name,
+              {
+                value:
+                  name === "datasetProperties"
+                    ? {
+                        customProperties: {
+                          type: "mssql",
+                          dashboard_uid: "d",
+                          datasource_uid: changed ? "other" : "s",
+                          panel_id: "1",
+                        },
+                      }
+                    : {},
+                systemMetadata: { version: "1" },
+              },
+            ]),
+          ),
+        },
+      ]);
+    },
+  };
+  const result = await readWorkspaceBiCatalog(requests, context, [urn]);
+  assert.equal(result.length, 1);
+  assert.deepEqual(calls, [
+    "/api/v2/graphql",
+    "/openapi/v3/entity/dataset/batchGet",
+  ]);
+  changed = true;
+  await assert.rejects(
+    readWorkspaceBiCatalog(requests, context, [urn]),
+    /workspace_bi_catalog_incomplete/,
+  );
+  await assert.rejects(
+    readWorkspaceBiCatalog(requests, context, [urn, urn]),
+    /workspace_bi_catalog_rejected/,
+  );
 });
 
 test("invalidated payload declarations survive the real bridge as prior-only evidence", async (t) => {

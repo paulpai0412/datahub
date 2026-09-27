@@ -1,0 +1,33 @@
+namespace com.ekop.agent
+
+import com.linkedin.common.Urn
+
+/** Private counterpart of the existing Task/Run/Decision record contract.
+ * Both Task and Run live under the isolated ekopSemanticReview entity type;
+ * sensitive content must never be copied into legacy public Task/Run aspects.
+ * Host enforces publication-only Decisions, tenant/source/session ownership,
+ * immutable consent/attempt history and conditional writes. Schema is not ACL,
+ * append-only enforcement, a lock or permission to publish.
+ */
+@Aspect = { "name": "ekopSemanticRun" }
+record EkopSemanticRun {
+  @UrnValidation = { "entityTypes": [ "corpuser" ] }
+  actor: Urn
+
+  tenant: string
+
+  @UrnValidation = { "entityTypes": [ "dataHubIngestionSource" ] }
+  source: Urn
+
+  @UrnValidation = { "entityTypes": [ "ekopSemanticReview" ] }
+  task: Urn
+
+  taskVersion: string
+  sessionId: string
+  decisions: array[EkopAgentDecision] = []
+
+  /** Same CAS admission closure contract as the legacy Run. Never remove or
+   * rewrite a closure or consumed attempt; absence never automatically resumes.
+   */
+  closedAt: optional long
+}

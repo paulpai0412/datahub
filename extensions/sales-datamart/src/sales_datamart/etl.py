@@ -208,6 +208,34 @@ _LOCK_SQL = text(
     """
 )
 
+_UNKNOWN_MEMBERS_SQL = text(
+    """
+    SELECT TOP (2)
+        CASE WHEN d.[FullDate] = CONVERT(date, '19000101')
+            AND d.[CalendarYear] = 0 AND d.[CalendarQuarter] = 0 AND d.[CalendarMonth] = 0
+            AND CONVERT(varbinary(max), d.[MonthName]) = CONVERT(varbinary(max), N'Unknown')
+            AND d.[DayOfMonth] = 0
+            AND t.[SourceTerritoryID] = 0
+            AND CONVERT(varbinary(max), t.[TerritoryName]) = CONVERT(varbinary(max), N'Unknown')
+            AND CONVERT(varbinary(max), t.[CountryRegionCode]) = CONVERT(varbinary(max), N'UNK')
+            AND CONVERT(varbinary(max), t.[TerritoryGroup]) = CONVERT(varbinary(max), N'Unknown')
+            AND p.[SourceProductID] = 0
+            AND CONVERT(varbinary(max), p.[ProductName]) = CONVERT(varbinary(max), N'Unknown')
+            AND CONVERT(varbinary(max), p.[ProductNumber]) = CONVERT(varbinary(max), N'UNKNOWN')
+            AND p.[SourceProductSubcategoryID] IS NULL AND p.[ProductSubcategoryName] IS NULL
+            AND p.[SourceProductCategoryID] IS NULL AND p.[ProductCategoryName] IS NULL
+            AND c.[SourceCustomerID] = 0 AND c.[SourceTerritoryID] IS NULL
+            AND c.[TerritoryKey] = 0
+        THEN 1 ELSE 0 END AS [canonical]
+    FROM [dm].[dim_date] AS d WITH (UPDLOCK, HOLDLOCK)
+    CROSS JOIN [dm].[dim_territory] AS t WITH (UPDLOCK, HOLDLOCK)
+    CROSS JOIN [dm].[dim_product] AS p WITH (UPDLOCK, HOLDLOCK)
+    CROSS JOIN [dm].[dim_customer] AS c WITH (UPDLOCK, HOLDLOCK)
+    WHERE d.[DateKey] = 0 AND t.[TerritoryKey] = 0
+      AND p.[ProductKey] = 0 AND c.[CustomerKey] = 0
+    """
+)
+
 _INSERT_DATE_SQL = text(
     """
     INSERT INTO [dm].[dim_date]
@@ -342,8 +370,25 @@ _TARGET_METRICS_SQL = text(
     """
 )
 
-_VIEW_COUNT_SQL = text(
-    "SELECT COUNT_BIG(*) AS reporting_view_count FROM [reporting].[v_sales_order_line] WHERE :include_rows = 1"
+_VIEW_METRICS_SQL = text(
+    """
+    SELECT COUNT_BIG(*) AS reporting_view_count,
+           COUNT_BIG(CASE WHEN m.[in_scope] = 1 THEN 1 END) AS reporting_view_scope_count,
+           COALESCE(SUM(CASE WHEN m.[in_scope] = 1 THEN CONVERT(decimal(38,6), v.[OrderQty]) END), 0)
+               AS reporting_view_quantity,
+           COALESCE(SUM(CASE WHEN m.[in_scope] = 1 THEN CONVERT(decimal(38,6), v.[LineNetAmount]) END), 0)
+               AS reporting_view_line_net_amount,
+           COALESCE(SUM(CASE WHEN m.[in_scope] = 1 THEN CONVERT(decimal(38,6), v.[SourceLineTotal]) END), 0)
+               AS reporting_view_source_line_total,
+           COUNT(DISTINCT CASE WHEN m.[in_scope] = 1 THEN v.[SalesOrderID] END) AS reporting_view_order_count
+    FROM [reporting].[v_sales_order_line] AS v
+    CROSS APPLY (VALUES (CASE WHEN v.[OrderDate] >= :start_date
+                               AND v.[OrderDate] <= :end_date
+                               AND v.[Status] = :status
+                               AND v.[CurrencyRateID] IS NULL
+                              THEN 1 ELSE 0 END)) AS m([in_scope])
+    WHERE :include_rows = 1
+    """
 )
 
 
@@ -526,6 +571,10 @@ def _ensure_unique(values: Sequence[int], name: str) -> set[int]:
     result = set(values)
     if len(result) != len(values):
         raise SourceValidationError(f"duplicate_{name}")
+    # Target key 0 is the Unknown member for every source dimension. A real
+    # source ID 0 would UPDATE that row instead of receiving its own identity.
+    if 0 in result:
+        raise SourceValidationError(f"reserved_{name}_zero")
     return result
 
 
@@ -612,6 +661,11 @@ def _execute_many(conn: SqlConnection, statement: Any, rows: Iterable[Mapping[st
 
 
 def _load_dimensions(conn: SqlConnection, extracted: Extracted, scope: Scope) -> tuple[dict[int, int], dict[int, int], dict[int, int]]:
+    # Existing target members are not repaired by the idempotent DDL. Lock and
+    # check all four before a dimension update can route source ID 1 to key 0.
+    sentinel = _fetch(conn, _UNKNOWN_MEMBERS_SQL)
+    if len(sentinel) != 1 or type(sentinel[0].get("canonical")) is not int or sentinel[0]["canonical"] != 1:
+        raise ETLError("target_unknown_member_invalid")
     _execute_many(conn, _INSERT_DATE_SQL, _date_rows(scope))
 
     _execute_many(
@@ -767,12 +821,37 @@ def _validate_target(conn: SqlConnection, extracted: Extracted, scope: Scope) ->
     }
     if actual != expected:
         raise ETLError("target_source_reconciliation_failed")
-    view_rows = _fetch(conn, _VIEW_COUNT_SQL, {"include_rows": 1})
+    view_rows = _fetch(conn, _VIEW_METRICS_SQL, {
+        "include_rows": 1,
+        "start_date": scope.start_date,
+        "end_date": scope.end_date,
+        "status": scope.status,
+    })
     if len(view_rows) != 1:
         raise ETLError("reporting_view_count_unavailable")
-    view_count = _mapping_int(view_rows[0], "reporting_view_count", "reporting_view_count")
+    view = view_rows[0]
+    view_count = _mapping_int(view, "reporting_view_count", "reporting_view_count")
+    scoped_view_count = _mapping_int(view, "reporting_view_scope_count", "reporting_view_scope_count")
     if view_count < actual["fact_count"]:
         raise ETLError("reporting_view_row_loss")
+    # The receipt retains its global count; only the same approved scope can prove
+    # the view did not lose or duplicate rows hidden by out-of-scope history.
+    if scoped_view_count != actual["fact_count"]:
+        raise ETLError("reporting_view_scope_mismatch")
+    view_metrics = {
+        "quantity": _target_decimal(view.get("reporting_view_quantity"), "reporting_view_quantity"),
+        "line_net_amount": _target_decimal(view.get("reporting_view_line_net_amount"), "reporting_view_line_net_amount"),
+        "source_line_total": _target_decimal(view.get("reporting_view_source_line_total"), "reporting_view_source_line_total"),
+        "order_count": _mapping_int(view, "reporting_view_order_count", "reporting_view_order_count"),
+    }
+    expected_view_metrics = {
+        "quantity": actual["quantity"],
+        "line_net_amount": actual["line_net_amount"],
+        "source_line_total": actual["source_line_total"],
+        "order_count": actual["order_count"],
+    }
+    if view_metrics != expected_view_metrics:
+        raise ETLError("reporting_view_metrics_mismatch")
     return {**actual, "reporting_view_count": view_count}
 
 
@@ -799,7 +878,7 @@ def _receipt(scope: Scope, extracted: Extracted, metrics: Mapping[str, Any], ela
         "reconciliation": {
             "line_net_amount": str(line_net),
             "source_line_total": str(metrics["source_line_total"]),
-            "aov": None if orders == 0 else str((line_net / Decimal(orders)).quantize(_DECIMAL_6)),
+            "aov": None if orders == 0 else str((line_net / Decimal(orders)).quantize(_DECIMAL_6, rounding=ROUND_HALF_UP)),
         },
         "elapsed_ms": elapsed_ms,
         "credentials_in_receipt": False,

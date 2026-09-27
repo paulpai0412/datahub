@@ -98,12 +98,13 @@ SQL 必須經過受控來源執行入口；LLM、瀏覽器及一般插件不得�
 區分兩類工作：
 
 1. **關係驗證**：依受控 Predicate／驗證規則產生 SQL，回傳聚合指標與證據。
-2. **使用者查詢**：依使用者身分重新授權，執行政策允許的唯讀查詢。
+2. **使用者查詢**：依 2026-09-26 最新決策，**目前登入者可見的 DataHub metadata 即為產品查詢授權**；以 metadata 驅動自然語言、SQL 及 Grafana Dashboard／Chart，不寫死資料集、日期、指標或報表。方案見 `docs/design/datahub-agent-metadata-query.md`。
 
 共同要求：
 
-- Catalog 可見權限不等於來源 SELECT 權限。
-- 執行前檢查身分、來源、物件範圍、SQL AST 與允許操作。
+- 不另建逐人來源 SELECT 授權名單、不要求逐次人工批准、不把一次性驗收次數當產品限制。來源 DB 依實際連線帳號決定允許／拒絕查詢；共用帳號不冒稱逐人 DB／RLS 身分。
+- 執行及讀回仍核可信登入身分、被引用 Dataset／欄位的當前 DataHub 可見性、來源精確定位、SQL AST 與唯讀操作。這是沿用 metadata ACL 與執行安全，不是另一套授權管理。
+- 來源連線／Secret 為可信部署基礎設定；不從 metadata 的任意 URL、模型參數或 ingestion 管理帳號自動取得查詢憑證。缺少連線／driver 明示未配置，不以權限審批或假數值代替。
 - 使用來源最小權限、timeout、並行限制、取消及結果大小限制。
 - 不能只靠 SQL 以 `SELECT` 開頭或 AST 解析成功就判定安全。
 - 未經另外核准，不執行來源 DDL、DML 或其他寫入。

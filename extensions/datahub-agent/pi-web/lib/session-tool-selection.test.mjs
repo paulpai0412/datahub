@@ -5,6 +5,7 @@ import { createJiti } from "jiti";
 const {
   TOOL_SELECTION_TYPE,
   appendSessionToolSelection,
+  isDataHubOnlySelection,
   readSessionToolSelection,
   validateSessionToolSelection,
 } = await createJiti(import.meta.url).import("./session-tool-selection.ts");
@@ -22,11 +23,17 @@ function entry(data, customType = TOOL_SELECTION_TYPE) {
 
 test("a missing tool-selection entry identifies a legacy session", () => {
   assert.equal(readSessionToolSelection([]), undefined);
-  assert.equal(readSessionToolSelection([entry({ version: 1, tools: [] }, "other")]), undefined);
+  assert.equal(
+    readSessionToolSelection([entry({ version: 1, tools: [] }, "other")]),
+    undefined,
+  );
 });
 
 test("an empty selection is distinct from a missing selection", () => {
-  assert.deepEqual(readSessionToolSelection([entry({ version: 1, tools: [] })]), []);
+  assert.deepEqual(
+    readSessionToolSelection([entry({ version: 1, tools: [] })]),
+    [],
+  );
 });
 
 test("the newest valid tool selection wins and invalid newer entries are ignored", () => {
@@ -43,15 +50,49 @@ test("the newest valid tool selection wins and invalid newer entries are ignored
 });
 
 test("tool selections accept only built-in tools", () => {
-  assert.deepEqual(validateSessionToolSelection(["read", "write", "read"]), ["read", "write"]);
-  assert.throws(() => validateSessionToolSelection(["read", "extension-tool"]), /built-in tool names/);
-  assert.throws(() => validateSessionToolSelection(undefined), /built-in tool names/);
+  assert.deepEqual(validateSessionToolSelection(["read", "write", "read"]), [
+    "read",
+    "write",
+  ]);
+  assert.throws(
+    () => validateSessionToolSelection(["read", "extension-tool"]),
+    /built-in tool names/,
+  );
+  assert.throws(
+    () => validateSessionToolSelection(undefined),
+    /built-in tool names/,
+  );
+});
+
+test("only the exact extension-only DataHub preset is accepted", () => {
+  const datahub = ["datahub_catalog", "datahub_sql", "datahub_grafana"];
+  assert.equal(isDataHubOnlySelection(datahub), true);
+  assert.deepEqual(validateSessionToolSelection(datahub), datahub);
+  assert.deepEqual(
+    readSessionToolSelection([entry({ version: 1, tools: datahub })]),
+    datahub,
+  );
+  for (const invalid of [
+    ["datahub_sql"],
+    [...datahub, "read"],
+    [...datahub, "bash"],
+    [...datahub, "datahub_sql"],
+  ]) {
+    assert.equal(isDataHubOnlySelection(invalid), false);
+    assert.throws(
+      () => validateSessionToolSelection(invalid),
+      /DataHub-only preset/,
+    );
+  }
 });
 
 test("appending a selection writes the versioned custom entry", () => {
   const calls = [];
-  appendSessionToolSelection({
-    appendCustomEntry: (...args) => calls.push(args),
-  }, []);
+  appendSessionToolSelection(
+    {
+      appendCustomEntry: (...args) => calls.push(args),
+    },
+    [],
+  );
   assert.deepEqual(calls, [[TOOL_SELECTION_TYPE, { version: 1, tools: [] }]]);
 });

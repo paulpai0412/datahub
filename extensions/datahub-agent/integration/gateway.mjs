@@ -1,4 +1,5 @@
 import { createServer, request as httpRequest } from "node:http";
+import { timingSafeEqual } from "node:crypto";
 import { readFile, readdir, stat } from "node:fs/promises";
 import { join, relative, extname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +8,10 @@ import { BrowserGrants, GrantError } from "./browser-grants.mjs";
 import { IngestionError } from "./native-ingestion.mjs";
 import { DiscoveryError } from "./native-discovery.mjs";
 import { SemanticError } from "./native-semantic.mjs";
+import { CatalogError } from "./native-catalog.mjs";
+import { SqlError } from "./native-sql.mjs";
+import { GrafanaError } from "./native-grafana.mjs";
+import { QueryError } from "./query-metadata.mjs";
 import { TaskRecordError } from "./task-records.mjs";
 import manifest from "../pi-web/app/manifest.ts";
 import {
@@ -290,6 +295,14 @@ export async function createAgentGateway({
   taskRequest,
   discoveryRequest,
   semanticRequest,
+  catalogRequest,
+  sqlRequest,
+  sqlResultRequest,
+  grafanaRequest,
+  grafanaData,
+  grafanaServiceKey,
+  grafanaOriginByActor,
+  queryGrafanaOrigin,
   mfeDirectory,
   publicDirectory = fileURLToPath(
     new URL("../pi-web/public/", import.meta.url),
@@ -308,11 +321,25 @@ export async function createAgentGateway({
     maxRequestBytes <= 0
   )
     throw new Error("invalid_gateway_configuration");
+  if (
+    grafanaData &&
+    (typeof grafanaServiceKey !== "string" ||
+      !/^[A-Za-z0-9_-]{43}$/.test(grafanaServiceKey) ||
+      Buffer.from(grafanaServiceKey, "base64url").length !== 32)
+  )
+    throw new Error("invalid_gateway_configuration");
+  const serviceKeyBytes = grafanaData
+    ? Buffer.from(grafanaServiceKey, "base64url")
+    : null;
   const operations = new Map([
     ["/agent/ingestion", { handler: ingestionRequest, name: "ingestion" }],
     ["/agent/tasks", { handler: taskRequest, name: "tasks" }],
     ["/agent/discovery", { handler: discoveryRequest, name: "discovery" }],
     ["/agent/semantic", { handler: semanticRequest, name: "semantic" }],
+    ["/agent/catalog", { handler: catalogRequest, name: "catalog" }],
+    ["/agent/sql", { handler: sqlRequest, name: "sql" }],
+    ["/agent/sql-result", { handler: sqlResultRequest, name: "sql" }],
+    ["/agent/grafana", { handler: grafanaRequest, name: "grafana" }],
   ]);
   const staticFiles = new Map();
   for (const name of await readdir(mfeDirectory)) {
@@ -390,6 +417,40 @@ export async function createAgentGateway({
         response.end(request.method === "HEAD" ? undefined : publicAsset.bytes);
         return;
       }
+      if (rootHost && pathname === "/agent/grafana-data") {
+        if (request.method !== "GET")
+          throw new HttpError(405, "method_not_allowed");
+        if (!grafanaData) throw new HttpError(403, "grafana_not_configured");
+        const secret = request.headersDistinct["x-datahub-grafana-auth"];
+        const login = request.headersDistinct["x-datahub-grafana-login"];
+        const org = request.headersDistinct["x-datahub-grafana-org"];
+        if (
+          request.socket.remoteAddress !== "127.0.0.1" ||
+          request.headers.origin ||
+          request.headers["sec-fetch-site"] ||
+          request.url.length > 128 ||
+          secret?.length !== 1 ||
+          !/^[A-Za-z0-9_-]{43}$/.test(secret[0]) ||
+          !timingSafeEqual(
+            Buffer.from(secret[0], "base64url"),
+            serviceKeyBytes,
+          ) ||
+          login?.length !== 1 ||
+          org?.length !== 1
+        )
+          throw new HttpError(403, "grafana_scope_denied");
+        const url = new URL(request.url, gateway);
+        if (url.searchParams.size !== 1 || !url.searchParams.has("display"))
+          throw new HttpError(403, "grafana_scope_denied");
+        const rows = await grafanaData(url.searchParams.get("display"), {
+          assertGrant: (grantId, actorKey) =>
+            grants.assertGrant(grantId, actorKey),
+          viewerLogin: login[0],
+          orgId: org[0],
+        });
+        json(response, 200, rows);
+        return;
+      }
       if (rootHost) {
         if (request.method === "GET" && staticFiles.has(request.url)) {
           response.writeHead(200, { "content-type": "application/javascript" });
@@ -434,11 +495,15 @@ export async function createAgentGateway({
             : operations.has(request.url)
               ? ["grantId", "revokeToken", "request"]
               : ["grantId", "revokeToken"],
-          request.url === "/agent/semantic"
-            ? 49152 // JSON-escaped 24KB intent plus parent-only proof envelope.
-            : ["/agent/tasks", "/agent/discovery"].includes(request.url)
-              ? 16384
-              : 4096,
+          request.url === "/agent/sql"
+            ? 65536
+            : request.url === "/agent/semantic"
+              ? 49152 // JSON-escaped 24KB intent plus parent-only proof envelope.
+              : ["/agent/tasks", "/agent/discovery", "/agent/catalog"].includes(
+                    request.url,
+                  )
+                ? 16384
+                : 4096,
         );
         if (request.url === "/agent/bootstrap") {
           const actor = await verifyIdentity(request.headers.cookie);
@@ -452,29 +517,56 @@ export async function createAgentGateway({
             grantId,
             revokeToken,
             launchUrl: `${gateway.protocol}//${actorKey}.${gateway.host}/bootstrap#${ticket}`,
+            ...(grafanaOriginByActor?.has(actorKey)
+              ? { grafanaOrigin: grafanaOriginByActor.get(actorKey) }
+              : queryGrafanaOrigin
+                ? { grafanaOrigin: queryGrafanaOrigin }
+                : {}),
           });
         } else if (operations.has(request.url)) {
           const { handler, name } = operations.get(request.url);
           if (!handler) throw new HttpError(403, `${name}_not_configured`);
           const actor = await verifyIdentity(request.headers.cookie);
+          const sql = [
+            "/agent/sql",
+            "/agent/sql-result",
+            "/agent/grafana",
+          ].includes(request.url);
+          const interrupted = new AbortController();
+          const disconnect = () => interrupted.abort();
+          if (sql) {
+            request.once("aborted", disconnect);
+            response.once("close", disconnect);
+          }
           const assertActive = () => {
-            if (response.destroyed)
+            if (response.destroyed || (sql && interrupted.signal.aborted))
               throw new HttpError(409, "ingestion_request_closed");
             grants.renew(input.grantId, actor, input.revokeToken);
           };
-          assertActive();
-          const result = await handler(input.request, {
-            actor,
-            cookieHeader: request.headers.cookie,
-            assertActive,
-            ...(request.url === "/agent/tasks"
-              ? { runtime: await runtimeForActor(actor) }
-              : request.url === "/agent/semantic"
-                ? { getRuntime: () => runtimeForActor(actor) }
+          try {
+            assertActive();
+            const result = await handler(input.request, {
+              actor,
+              cookieHeader: request.headers.cookie,
+              assertActive,
+              ...(sql ? { signal: interrupted.signal } : {}),
+              ...(request.url === "/agent/grafana"
+                ? { grantId: input.grantId }
                 : {}),
-          });
-          assertActive();
-          json(response, 200, result);
+              ...(request.url === "/agent/tasks"
+                ? { runtime: await runtimeForActor(actor) }
+                : request.url === "/agent/semantic"
+                  ? { getRuntime: () => runtimeForActor(actor) }
+                  : {}),
+            });
+            assertActive();
+            json(response, 200, result);
+          } finally {
+            if (sql) {
+              request.off("aborted", disconnect);
+              response.off("close", disconnect);
+            }
+          }
         } else {
           if (request.url === "/agent/heartbeat") {
             try {
@@ -554,6 +646,10 @@ export async function createAgentGateway({
         error instanceof IngestionError ||
         error instanceof DiscoveryError ||
         error instanceof SemanticError ||
+        error instanceof CatalogError ||
+        error instanceof SqlError ||
+        error instanceof GrafanaError ||
+        error instanceof QueryError ||
         error instanceof TaskRecordError;
       const status = knownError
         ? error.status

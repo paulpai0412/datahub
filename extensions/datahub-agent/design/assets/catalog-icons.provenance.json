@@ -1,0 +1,28 @@
+{
+  "core": "v1.7.0.1",
+  "package": "@phosphor-icons/react@2.1.7",
+  "url": "https://registry.npmjs.org/@phosphor-icons/react/-/react-2.1.7.tgz",
+  "integrity": "sha512-g2e2eVAn1XG2a+LI09QU3IORLhnFNAFkNbo2iwbX6NOKSLOwvEMmTa7CgOzEbgNWR47z8i8kwjdvYZ5fkGx1mQ==",
+  "weight": "regular",
+  "sourceDefinitions": {
+    "Table": "26cd813451f37b027df22d3120599c51b1ad74fc4557f1039f62d7b38f4affa9",
+    "Rows": "696e91bb53243a1ef8ed2ed7050f05ff8b9361815dc1d0c03fd83702cd216806",
+    "Tag": "6835d49d3a7b3d53d8a4533aa25361fa4e1870deecbef88a93f65a874e43f8b4",
+    "BookmarkSimple": "ea86e350cd462342a57808a24ff748d3eea71e5a126d6f18243775d12cfbd399",
+    "Globe": "eb278ee96d7d139579fee34ee13bac46784604d26f686df057525787bfae9bf1",
+    "Folder": "1afaf11cb4a40a79fd471fa50765d5231903d7a5152e57790fa42517e954fd22",
+    "User": "10724460bb00ddd79e22c84f30c2d1a925b6271895aae5b8187cd8ab4b3547e6",
+    "UsersThree": "73880adc70e2111a407a5ee12b99d216823341d921e98ca93dd6bd4c37e09f85",
+    "ChartLine": "c33908e231dba5c36976d99cd38f8586f3a3d4dcef8ac0aff8a23e89cc74efa0",
+    "ChartBar": "c815956704c22d5206b5dbb4fcaa1557ef4348f00d5c19c57816578325b9f460",
+    "ShareNetwork": "e2a1913cdbe569eb35f0611155ece208defa452e9f4fdafb41f720dd36daecb5",
+    "Swap": "63ef281bc3cedf80103bbf1bcf46657b660fa6beed49aa25c3bec0393832ed1c",
+    "BookOpen": "efb67222c6b00d32021622fcfd47c1a81e5b72b8fffbae4de5ce8574e8789ca6",
+    "Columns": "dd84fd2cd76431db9e12fbeddc193984a41f7ca4b64cee213cae3d8109eea8f5",
+    "TreeStructure": "d17f794387fa24c73ad7a89c317d4775d268bd4f992192c06f030801b889660c",
+    "ListBullets": "282c5a66b77a1e55532de192f14fa739ce6909990192d3e917fca7a3f955e75d",
+    "Info": "7009d21bd208e336ac496a1d5b26e64a2eb46a08eac12f6f3e8e05e0aa2f7bf7"
+  },
+  "pathsCanonicalSha256": "b4672367edb6f3e83a63a545307c0a213ee48a9082fdde33c230a84237839dfd",
+  "note": "Static SVG path data only. Archive verified against upstream yarn.lock; source parsed, never executed. No runtime dependency or remote asset requests. Info is the local provenance tab; other icon choices follow pinned entity/sidebar source."
+}

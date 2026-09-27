@@ -52,7 +52,10 @@ def main():
             shutil.copy2(current, destination)
         env = {"PATH": os.environ["PATH"], "HOME": directory, "GIT_CONFIG_NOSYSTEM": "1"}
         subprocess.run(["git", "apply", "--reverse", "--check", str(patch)], cwd=source, env=env, check=True)
-        subprocess.run(["git", "apply", "--reverse", str(patch)], cwd=source, env=env, check=True)
+        # Git recreates patched files using its process umask. Preserve the
+        # public source modes in this private temporary tree even when the
+        # caller protects evidence with umask 077; do not alter the parent mask.
+        subprocess.run(["git", "apply", "--reverse", str(patch)], cwd=source, env=env, check=True, umask=0o022)
         try:
             original = json.loads(upstream.read_text())
         except (ValueError, OSError) as error:

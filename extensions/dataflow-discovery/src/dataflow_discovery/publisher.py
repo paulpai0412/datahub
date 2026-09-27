@@ -1120,7 +1120,7 @@ def _entity_object(spec: EntitySpec) -> Any:
     return entity
 
 
-def compile_workspace_lineage(analysis, snapshot, report, workflow, *, env):
+def compile_workspace_lineage(analysis, snapshot, report, workflow, *, env, adoption=None):
     """Source-bound desired native Aspects for the Composer's selected entrypoint.
 
     Called inside the trusted workspace binder, never with a model-provided
@@ -1144,11 +1144,78 @@ def compile_workspace_lineage(analysis, snapshot, report, workflow, *, env):
     flow = workflow['flow']
     flow_urn = str(DataFlowUrn('python', flow['id'].split(':', 1)[1], env))
     jobs = {job['id']: str(DataJobUrn(flow_urn, job['id'].split(':', 1)[1])) for job in workflow['jobs']}
+    evidence_only = []
+    if adoption is not None:
+        if not isinstance(adoption, dict) or set(adoption) != {'snapshotSha256', 'flowUrn', 'jobs', 'evidenceOnly', 'nativeVersions', 'relatedCatalogUrns'}:
+            raise PublicationError('workspace_adoption_invalid')
+        if adoption['snapshotSha256'] != snapshot.sha256:
+            raise PublicationError('workspace_compiler_source_mismatch')
+        related = adoption['relatedCatalogUrns']
+        if (not isinstance(related, list) or len(related) > 32
+                or any(not isinstance(urn, str) or len(urn) > 1024
+                       or not urn.startswith('urn:li:dataset:(urn:li:dataPlatform:grafana,') for urn in related)
+                or len(set(related)) != len(related)):
+            raise PublicationError('workspace_adoption_invalid')
+        flow_urn = adoption['flowUrn']
+        try:
+            parsed_flow = DataFlowUrn.from_string(flow_urn)
+            if str(parsed_flow) != flow_urn or not flow_urn.startswith('urn:li:dataFlow:(python,') or not flow_urn.endswith(f',{env})'):
+                raise ValueError('flow_mismatch')
+        except Exception as error:
+            raise PublicationError('workspace_adoption_invalid') from error
+        bound = adoption['jobs']
+        skipped = adoption['evidenceOnly']
+        if (not isinstance(bound, dict) or not bound or len(bound) > 16
+                or not isinstance(skipped, list) or len(skipped) > 8
+                or any(not isinstance(name, str) for name in skipped)
+                or len(set(skipped)) != len(skipped)
+                or set(bound) & set(skipped)
+                or set(bound) | set(skipped) != {job['name'] for job in workflow['jobs']}
+                or len({job['name'] for job in workflow['jobs']}) != len(workflow['jobs'])):
+            raise PublicationError('workspace_adoption_invalid')
+        try:
+            if (len(set(bound.values())) != len(bound)
+                    or any(not isinstance(name, str) or not isinstance(urn, str)
+                           or str(DataJobUrn.from_string(urn)) != urn
+                           or DataJobUrn.from_string(urn).flow != flow_urn
+                           for name, urn in bound.items())):
+                raise ValueError('job_mismatch')
+        except Exception as error:
+            raise PublicationError('workspace_adoption_invalid') from error
+        versions = adoption['nativeVersions']
+        targets = {flow_urn: {'dataFlowKey', 'dataFlowInfo'}, **{
+            urn: {'dataJobKey', 'dataJobInfo', 'dataJobInputOutput'} for urn in bound.values()}}
+        if (not isinstance(versions, dict) or set(versions) != set(targets)
+                or any(not isinstance(versions[urn], dict) or set(versions[urn]) != aspects
+                       or any(not isinstance(versions[urn][name], str)
+                              or not re.fullmatch(r'[1-9][0-9]*', versions[urn][name])
+                              for name in aspects)
+                       for urn, aspects in targets.items())):
+            raise PublicationError('workspace_adoption_invalid')
+        jobs = {job['id']: bound[job['name']] for job in workflow['jobs'] if job['name'] in bound}
+        evidence_only = [job for job in workflow['jobs'] if job['name'] in skipped]
+        by_id = {job['id']: job for job in workflow['jobs']}
+        for item in evidence_only:
+            links = [edge for edge in workflow['dependencies']
+                     if edge['from'] == item['id'] and edge['to'] in jobs
+                     and edge['method'] in {'record_transfer', 'lookup_transfer'}]
+            covered = {read['urn'] for edge in links for read in by_id[edge['to']]['reads']}
+            if (item['writes'] or not item['reads'] or not links
+                    or not {read['urn'] for read in item['reads']} <= covered
+                    or any(edge['to'] == item['id'] and edge['from'] in jobs
+                           for edge in workflow['dependencies'])):
+                raise PublicationError('workspace_adoption_unproven')
     properties = {'datahub_etl.sourceId': analysis.source_id, 'datahub_etl.snapshot': snapshot.sha256,
                   'datahub_etl.entrypoint': report['path'] + '::' + report['entrypoint'],
                   'datahub_etl.analysisVersion': analysis.analysis_version,
                   'datahub_etl.evidenceScope': 'selected_python_entrypoint_static_declarations'}
     encode = lambda value: json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    if evidence_only:
+        properties['datahub_etl.evidenceOnlyJobs'] = encode([
+            {'name': item['name'], 'candidateId': item['candidateId'],
+             'evidence': item['evidence'], 'reads': [read['urn'] for read in item['reads']],
+             'dependencies': [edge for edge in workflow['dependencies'] if edge['from'] == item['id']]}
+            for item in evidence_only])
     catalog_bindings = {binding['dataset']['urn']: binding['dataset']['schema_sha256']
                         for context in report['contexts'] for binding in context['bindings']}
     views = report.get('declared_views', {}).get('views', [])
@@ -1219,23 +1286,34 @@ def compile_workspace_lineage(analysis, snapshot, report, workflow, *, env):
     for urn in targets:
         targets[urn].discard(urn)
     aspects = []
-    def add(urn, aspect):
+    def add(urn, aspect, *, properties_only=False):
         mcp = MetadataChangeProposalWrapper(entityUrn=urn, aspect=aspect)
         if not mcp.validate():
             raise PublicationError('invalid_compiled_native_aspects')
-        aspects.append({'urn': urn, 'aspect': mcp.aspectName, 'value': aspect.to_obj()})
-    add(flow_urn, DataFlowInfoClass(name=flow['name'], env=env, customProperties=properties))
+        value = aspect.to_obj()
+        # Existing Flow/Job names belong to the native owner. The Host merges
+        # these source-bound proof properties into a fresh native Aspect.
+        aspects.append({'urn': urn, 'aspect': mcp.aspectName,
+                        'value': {'customProperties': value['customProperties']} if properties_only else value})
+    add(flow_urn, DataFlowInfoClass(name=flow['name'], env=env, customProperties=properties),
+        properties_only=adoption is not None)
     contexts = {context['context_id']: context for context in report['contexts']}
     for job in workflow['jobs']:
-        dependencies = sorted({jobs[item['from']] for item in workflow['dependencies'] if item['to'] == job['id']})
+        if job['id'] not in jobs:
+            continue
+        dependencies = sorted({jobs[item['from']] for item in workflow['dependencies']
+                               if item['to'] == job['id'] and item['from'] in jobs})
         evidence = {'source': job['evidence'], 'contexts': job['contexts'],
                     'invocations': job['invocations'], 'guards': [contexts[cid]['use']['guards'] for cid in job['contexts']],
                     'rowEffects': [{'contextId': cid, 'process': statement['process'], 'effect': statement['row_effect']}
                                   for cid in job['contexts'] for statement in contexts[cid]['write_statements']
                                   if 'row_effect' in statement],
                     'dependencies': [item for item in workflow['dependencies'] if item['to'] == job['id']]}
+        info = {'datahub_etl.sourceId': analysis.source_id, 'datahub_etl.evidence': encode(evidence)}
+        if adoption is not None:
+            info['datahub_etl.sourceFunction'] = job['name']
         add(jobs[job['id']], DataJobInfoClass(name=job['name'], type='COMMAND', flowUrn=flow_urn,
-            customProperties={'datahub_etl.sourceId': analysis.source_id, 'datahub_etl.evidence': encode(evidence)}))
+            customProperties=info), properties_only=adoption is not None)
         add(jobs[job['id']], DataJobInputOutputClass(inputDatasets=[item['urn'] for item in job['reads']],
             outputDatasets=[item['urn'] for item in job['writes']], inputDatajobs=dependencies))
     for view in views:

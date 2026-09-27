@@ -4,6 +4,7 @@ import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url);
 const {
+  PRESET_DATAHUB_ONLY,
   PRESET_DEFAULT,
   PRESET_FULL,
   PRESET_NONE,
@@ -12,7 +13,16 @@ const {
   getToolNamesForPreset,
 } = await jiti.import("./tool-presets.ts");
 
-const BUILTIN_NAMES = ["bash", "powershell", "read", "edit", "write", "grep", "find", "ls"];
+const BUILTIN_NAMES = [
+  "bash",
+  "powershell",
+  "read",
+  "edit",
+  "write",
+  "grep",
+  "find",
+  "ls",
+];
 
 function toolEntries(activeNames, customNames = []) {
   const active = new Set(activeNames);
@@ -25,6 +35,9 @@ function toolEntries(activeNames, customNames = []) {
 
 test("maps every tool preset to its built-in tools", () => {
   assert.deepEqual(getToolNamesForPreset("none"), PRESET_NONE);
+  assert.deepEqual(getToolNamesForPreset("datahub-only"), [
+    ...PRESET_DATAHUB_ONLY,
+  ]);
   assert.deepEqual(getToolNamesForPreset("read-only"), PRESET_READ_ONLY);
   assert.deepEqual(getToolNamesForPreset("default"), PRESET_DEFAULT);
   assert.deepEqual(getToolNamesForPreset("full"), PRESET_FULL);
@@ -36,16 +49,49 @@ test("recognizes presets while ignoring active custom tools", () => {
 
   assert.equal(getPresetFromTools(toolEntries([], customNames)), "none");
   assert.equal(
-    getPresetFromTools(toolEntries([...PRESET_READ_ONLY, ...customNames], customNames)),
+    getPresetFromTools(
+      toolEntries([...PRESET_READ_ONLY, ...customNames], customNames),
+    ),
     "read-only",
   );
   assert.equal(
-    getPresetFromTools(toolEntries([...PRESET_DEFAULT, ...customNames], customNames)),
+    getPresetFromTools(
+      toolEntries([...PRESET_DEFAULT, ...customNames], customNames),
+    ),
     "default",
   );
   assert.equal(
-    getPresetFromTools(toolEntries([...PRESET_FULL, ...customNames], customNames)),
+    getPresetFromTools(
+      toolEntries([...PRESET_FULL, ...customNames], customNames),
+    ),
     "full",
+  );
+});
+
+test("recognizes the exact DataHub-only selection without accepting extra tools", () => {
+  assert.equal(
+    getPresetFromTools(
+      toolEntries(
+        [...PRESET_DATAHUB_ONLY],
+        [...PRESET_DATAHUB_ONLY, "web_search"],
+      ),
+    ),
+    "datahub-only",
+  );
+  assert.equal(
+    getPresetFromTools(
+      toolEntries(
+        [...PRESET_DATAHUB_ONLY, "web_search"],
+        [...PRESET_DATAHUB_ONLY, "web_search"],
+      ),
+    ),
+    "default",
+  );
+  assert.equal(
+    getPresetFromTools(
+      toolEntries(["read", ...PRESET_DATAHUB_ONLY], [...PRESET_DATAHUB_ONLY]),
+    ),
+    "default",
   );
 });
 
@@ -61,7 +107,17 @@ test("recognizes PowerShell as the shell in standard presets", () => {
     "default",
   );
   assert.equal(
-    getPresetFromTools(toolEntries(["powershell", "read", "edit", "write", "grep", "find", "ls"])),
+    getPresetFromTools(
+      toolEntries([
+        "powershell",
+        "read",
+        "edit",
+        "write",
+        "grep",
+        "find",
+        "ls",
+      ]),
+    ),
     "full",
   );
 });

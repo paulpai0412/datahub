@@ -1,0 +1,11 @@
+namespace com.ekop.agent
+
+/** Opaque Host-generated locator for a private Semantic Task or Run.
+ * Never encode asset names, actors, instructions or evidence in this key.
+ * A locator is not authority. Native policies must isolate this entity type
+ * BEFORE writing any review content; this schema does not establish an ACL.
+ */
+@Aspect = { "name": "ekopSemanticReviewKey" }
+record EkopSemanticReviewKey {
+  id: string
+}

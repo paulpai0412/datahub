@@ -1,5 +1,8 @@
 import { installIngestionBridge } from "./ingestion.js";
 import { installDiscoveryBridge } from "./discovery.js";
+import { installCatalogBridge } from "./catalog.js";
+import { installSqlBridge } from "./sql.js";
+import { installGrafanaBridge } from "./grafana.js";
 import { installSemanticBridge } from "./semantic.js";
 import { installRegistryView } from "./registry.js";
 import { installTaskDecisionBridge } from "./task-decision.js";
@@ -35,6 +38,9 @@ export function mount(container) {
   let heartbeat;
   let stopIngestion;
   let stopDiscovery;
+  let stopCatalog;
+  let stopSql;
+  let stopGrafana;
   let stopSemantic;
   let stopRegistry;
   let stopDecisions;
@@ -56,16 +62,30 @@ export function mount(container) {
             AbortSignal.timeout(
               path === "/agent/tasks"
                 ? 90000
-                : ["/agent/ingestion", "/agent/discovery", "/agent/semantic"].includes(path)
-                  ? 45000
-                  : 10000,
+                : path === "/agent/sql"
+                  ? 120000
+                  : path === "/agent/grafana"
+                    ? 105000
+                    : path === "/agent/sql-result"
+                      ? 30000
+                      : [
+                            "/agent/ingestion",
+                            "/agent/discovery",
+                            "/agent/semantic",
+                            "/agent/catalog",
+                          ].includes(path)
+                        ? 45000
+                        : 10000,
             ),
           ]),
     });
   }
   function failed() {
+    stopGrafana?.();
     stopIngestion?.();
     stopDiscovery?.();
+    stopCatalog?.();
+    stopSql?.();
     stopSemantic?.();
     stopDecisions?.();
     stopRegistry?.();
@@ -86,6 +106,7 @@ export function mount(container) {
         launchUrl,
         grantId: issuedId,
         revokeToken: issuedProof,
+        grafanaOrigin,
       } = await response.json();
       if (
         typeof issuedId !== "string" ||
@@ -156,6 +177,72 @@ export function mount(container) {
           return response.json();
         },
       });
+      stopCatalog = installCatalogBridge({
+        frame,
+        origin: launch.origin,
+        send: async (request, signal) => {
+          const response = await post(
+            "/agent/catalog",
+            { grantId, revokeToken, request: JSON.stringify(request) },
+            false,
+            signal,
+          );
+          return response.json();
+        },
+      });
+      if (grafanaOrigin !== undefined) {
+        const approved = parseUrl(grafanaOrigin);
+        if (
+          approved.hostname !== gateway.hostname ||
+          approved.protocol !== gateway.protocol ||
+          !approved.port ||
+          approved.pathname !== "/" ||
+          approved.search ||
+          approved.hash ||
+          approved.username ||
+          approved.password ||
+          approved.origin === gateway.origin
+        )
+          throw new Error("invalid_grafana_origin");
+        stopGrafana = installGrafanaBridge({
+          container,
+          frame,
+          origin: launch.origin,
+          grafanaOrigin: approved.origin,
+          send: async (request, signal) => {
+            const response = await post(
+              "/agent/grafana",
+              { grantId, revokeToken, request: JSON.stringify(request) },
+              false,
+              signal,
+            );
+            if (!response.ok) throw new Error("grafana_request_denied");
+            return response.json();
+          },
+        });
+      }
+      stopSql = installSqlBridge({
+        frame,
+        origin: launch.origin,
+        execute: async (request, signal) => {
+          const response = await post(
+            "/agent/sql",
+            { grantId, revokeToken, request: JSON.stringify(request) },
+            false,
+            signal,
+          );
+          return response.json();
+        },
+        readResult: async (request, signal) => {
+          const response = await post(
+            "/agent/sql-result",
+            { grantId, revokeToken, request: JSON.stringify(request) },
+            false,
+            signal,
+          );
+          return response.json();
+        },
+      });
       stopDiscovery = installDiscoveryBridge({
         frame,
         origin: launch.origin,
@@ -202,8 +289,11 @@ export function mount(container) {
     })
     .catch(failed);
   return () => {
+    stopGrafana?.();
     stopIngestion?.();
     stopDiscovery?.();
+    stopCatalog?.();
+    stopSql?.();
     stopSemantic?.();
     stopDecisions?.();
     stopRegistry?.();

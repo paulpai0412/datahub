@@ -239,7 +239,7 @@ def _workflow_preview(workflow, graph, compiled):
     return {'flow': {'name': workflow['flow']['name'], 'evidence': point(workflow['flow']['evidence']),
                      'urn': compiled['flowUrn'] if compiled else None},
             'jobs': [{'name': job['name'], 'evidence': point(job['evidence']),
-                      'urn': compiled['jobUrns'][job['id']] if compiled else None,
+                      'urn': compiled['jobUrns'].get(job['id']) if compiled else None,
                       'contexts': [indexes[cid] for cid in job['contexts']],
                       'reads': [indexes[item['urn']] for item in job['reads']],
                       'writes': [indexes[item['urn']] for item in job['writes']]}
@@ -254,8 +254,9 @@ def _workflow_preview(workflow, graph, compiled):
 def analyze_workspace(policy: dict[str, Any], request: dict[str, Any], catalog=None, *, compile_native=False, related_catalog=None) -> dict[str, Any]:
     """Host policy authorizes the root; requests can only select within it."""
     # pi-lens-ignore: no-identity-operator-on-literals
+    allowed = {'sourceId', 'root', 'workspace', 'modelContextApproved', 'catalogScopes'}
     if (policy.get('workspace') is not True or policy.get('modelContextApproved') is not True
-            or set(policy) != {'sourceId', 'root', 'workspace', 'modelContextApproved', 'catalogScopes'}):
+            or set(policy) not in (allowed, allowed | {'adoption'})):
         raise ValueError('workspace_policy_rejected')
     receipt, manifest = capture_workspace_and_analyze(policy['root'], request['selection'], source_id=policy['sourceId'])
     if request.get('snapshotSha256') is not None and request['snapshotSha256'] != receipt.snapshot.sha256:
@@ -320,8 +321,15 @@ def analyze_workspace(policy: dict[str, Any], request: dict[str, Any], catalog=N
             workflow = describe_python_jobs(receipt.analysis, receipt.snapshot, report)
             environments = {scope.env for scope in scopes.values()}
             compiled = None
-            if not related_blockers and source_coverage['complete'] and report['output_partition']['complete'] and workflow['coverage']['sqlOwnershipComplete'] and len(environments) == 1:
-                compiled = compile_workspace_lineage(receipt.analysis, receipt.snapshot, report, workflow, env=next(iter(environments)))
+            ready_to_compile = (not related_blockers and source_coverage['complete']
+                                and report['output_partition']['complete']
+                                and workflow['coverage']['sqlOwnershipComplete'] and len(environments) == 1)
+            # A workspace without an operator-selected, version-pinned native
+            # identity remains a read-only preview. Never present a parallel
+            # Flow / additional Jobs as a publishable fallback.
+            if ready_to_compile and policy.get('adoption') is not None:
+                compiled = compile_workspace_lineage(receipt.analysis, receipt.snapshot, report, workflow,
+                                                    env=next(iter(environments)), adoption=policy['adoption'])
             if compile_native:
                 if compiled is None:
                     raise ValueError('workspace_lineage_incomplete')
@@ -329,6 +337,8 @@ def analyze_workspace(policy: dict[str, Any], request: dict[str, Any], catalog=N
                         'sourceUnresolvedCount': len(validation.unresolved_candidate_ids),
                         'complete': False, 'remainingGate': 'source_coverage_native_merge_and_trusted_consent'}
             graph = _catalog_graph(report, catalog, path, receipt.snapshot)
+            if ready_to_compile and policy.get('adoption') is None:
+                graph['blockers'].append({'reason': 'workspace_identity_policy_required', 'count': 1})
             if compiled is not None:
                 graph['blockers'] = [item for item in graph['blockers'] if item['reason'] != 'dataflow_job_publication_plan_not_compiled']
                 graph['blockers'].append({'reason': 'native_merge_and_trusted_consent_required', 'count': 1})

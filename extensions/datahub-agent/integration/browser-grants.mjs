@@ -115,6 +115,21 @@ export class BrowserGrants {
     return Object.freeze({ actor: group.actor, expires });
   }
 
+  /** Internal Grafana-read freshness check; ID alone is never browser authority.
+   * The random query capability remains required at the separate GET boundary. */
+  assertGrant(grantId, actorKey) {
+    const grant = this.#grants.get(grantId);
+    if (
+      !grant ||
+      grant.actor.key !== actorKey ||
+      !grant.sessionHash ||
+      grant.expires <= this.#clock() ||
+      !this.#sessions.has(grant.sessionHash)
+    )
+      throw new GrantError();
+    return true;
+  }
+
   renew(grantId, actor, revokeToken) {
     this.sweep();
     const grant = this.#grants.get(grantId);

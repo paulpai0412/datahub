@@ -1,53 +1,6 @@
 {
-  "description": "DataHub skin, MCP, native ingestion and Task Decision UI plus intent-only read-only DataFlow Discovery; original upstream lock unchanged; reverse patch restores 506-file baseline",
   "upstream_lock_sha256": "639fa77b24701537ef988158b479e396c0bfd49cf5ee3a72d041147effee9270",
-  "patch_sha256": "082ecc81024ac203a97f6ce2175994727e43626cdb33c2a275696b757cbf5757",
-  "changed": [
-    "app/layout.tsx",
-    "components/AppShell.auto-name.test.mjs",
-    "components/AppShell.file-viewer-state.test.mjs",
-    "components/AppShell.mobile-toolbar.test.mjs",
-    "components/AppShell.tsx",
-    "components/AppShell.workspace-memory.test.mjs",
-    "components/ChatWindow.extension-request.test.mjs",
-    "components/ChatWindow.notices.test.mjs",
-    "components/ChatWindow.quoted-branch.test.mjs",
-    "components/ChatWindow.tsx",
-    "components/MobilePwaLayout.test.mjs",
-    "components/SessionSidebar.test.mjs",
-    "components/SessionSidebar.tsx",
-    "components/SessionSidebar.worktree.test.mjs",
-    "components/SettingsPanel.test.mjs",
-    "components/SettingsPanel.tsx",
-    "hooks/useAgentSession.test.mjs",
-    "hooks/useTheme.ts",
-    "lib/rpc-manager-extension-ui.test.mjs",
-    "lib/rpc-manager.test.mjs",
-    "lib/rpc-manager.ts",
-    "lib/settings-navigation.ts",
-    "lib/subagent-runtime.ts",
-    "lib/theme.ts",
-    "package-lock.json",
-    "package.json"
-  ],
-  "added": [
-    "app/api/mcp-config/route.test.mjs",
-    "app/api/mcp-config/route.ts",
-    "app/datahub.css",
-    "app/fonts/MULISH-OFL.txt",
-    "app/fonts/Mulish-Regular.ttf",
-    "app/fonts/Mulish-SemiBold.ttf",
-    "components/DataHubEmbed.test.mjs",
-    "components/DataHubHostBridge.test.mjs",
-    "components/DataHubIngestionBridge.tsx",
-    "components/McpConfig.tsx",
-    "lib/datahub-decision-extension.ts",
-    "lib/datahub-discovery-extension.ts",
-    "lib/datahub-extension-entry.ts",
-    "lib/datahub-ingestion-extension.ts",
-    "lib/mcp-config-store.test.mjs",
-    "lib/mcp-config-store.ts"
-  ],
+  "patch_sha256": "49be7e1f8fc2e007a73ca3a3fc791aaf0a347bf700ba950f76209cd091164fc0",
   "files": {
     ".github/workflows/ci.yml": {
       "sha256": "8264c281e466357e508448af8e14063f69a45bef52ccf8dd077ef729f99cd3ca",
@@ -58,7 +11,7 @@
       "mode": 420
     },
     "AGENTS.md": {
-      "sha256": "e42631c2c2cb72def06af63bab83becd9c891cad01b0c0fee99998e84838c21f",
+      "sha256": "fcb07895ee232d2ea7e0a57ad3f7696f5ad094564dc268eea92bf881d1438b29",
       "mode": 420
     },
     "CONTEXT.md": {
@@ -446,7 +399,7 @@
       "mode": 420
     },
     "components/AppShell.tsx": {
-      "sha256": "ee445af214ed7d660294820b70ca4d612f70b91dcd1689f62dc547f05acf406d",
+      "sha256": "e025a6cb5b920e57f2636c80dc109a4664fa49468651a45c884721c98f8f66c9",
       "mode": 420
     },
     "components/AppShell.workspace-memory.test.mjs": {
@@ -474,11 +427,11 @@
       "mode": 420
     },
     "components/ChatInput.test.mjs": {
-      "sha256": "4ef13d7d65dcd24cfb3b19081ecaa3a30b8db6521214b1b87a8f3cd04de57b13",
+      "sha256": "d93813b551782d1fef9a4ff5b61d71553b133ce3d8c0ebf52069c7e2c60a7d57",
       "mode": 420
     },
     "components/ChatInput.tsx": {
-      "sha256": "311f40617177e887f75788b265231aae5b8fb9a7cd611660f8bd1446a5b8b7f6",
+      "sha256": "197c446bd9e82fbfdeeac649dccec15268bc585ad96f53d269a968cfea1535f2",
       "mode": 420
     },
     "components/ChatMinimap.module.css": {
@@ -502,7 +455,7 @@
       "mode": 420
     },
     "components/ChatWindow.process-details.test.mjs": {
-      "sha256": "ad961eb908f0cb983dfb5d3ae8f68997d45eef7a23cc8c305e5c94858c254ccd",
+      "sha256": "bbff51c92597fa4565383104c07347f4013affa6a6ebcacce3da9032fa51b21a",
       "mode": 420
     },
     "components/ChatWindow.quoted-branch.test.mjs": {
@@ -510,19 +463,83 @@
       "mode": 420
     },
     "components/ChatWindow.tsx": {
-      "sha256": "bf2e5acaf3c5b74d042cab79975d01647b173f1950394ed6cb39ad376d6cb753",
+      "sha256": "32a2f2501797aab6640994ae2b943a836446b3937128cf734c5203704efd81a8",
+      "mode": 420
+    },
+    "components/DataHubCatalog.module.css": {
+      "sha256": "c6aef52c8b6f4cf5bbf6efac13b239d1367475ed62642f4343fe2bd2e9c0fe27",
+      "mode": 420
+    },
+    "components/DataHubCatalog.tsx": {
+      "sha256": "183a86b384a1ea89deafc245a0e1f55f0d8537da1be57d9dd36edffb2c22c0cb",
+      "mode": 420
+    },
+    "components/DataHubCatalogField.tsx": {
+      "sha256": "77792a838fa4a8fd8cfc6d34253ae6a598be95756f299027c39a32a662c9e12f",
+      "mode": 420
+    },
+    "components/DataHubCatalogFieldLineage.tsx": {
+      "sha256": "eb54d722fda337320beac6f2a7f61b4c7ce67061ad8dcebc09191afa4d878534",
+      "mode": 420
+    },
+    "components/DataHubCatalogIcons.tsx": {
+      "sha256": "40970e2aff72a8a98a246ef7f260bf6947c5a864d8d937f7fa5bce78bed9074b",
+      "mode": 420
+    },
+    "components/DataHubCatalogLineage.tsx": {
+      "sha256": "de903b4613a4c1a5cc24ab183ab831e70fae2a6a8b214606fe536aa95ee7cf5c",
+      "mode": 420
+    },
+    "components/DataHubDashboardDraft.module.css": {
+      "sha256": "1edc215358f32e72d011b5de110c28b91950a6a29f2e466659b9f3015fa40469",
+      "mode": 420
+    },
+    "components/DataHubDashboardDraft.tsx": {
+      "sha256": "9a68050a25369d35e94764a7e583f425c7cb85e1c22cd0b8feff3a4479ab2489",
       "mode": 420
     },
     "components/DataHubEmbed.test.mjs": {
       "sha256": "5b835eb2915369a05d3a8a16ce49b6a93123eb18972158f826a86632e79db8d6",
       "mode": 420
     },
+    "components/DataHubEtlPreview.tsx": {
+      "sha256": "98fb2c0769b1307244720ecea5fe7ac33b6afa881c776dd0b7953592210c7148",
+      "mode": 420
+    },
+    "components/DataHubGrafanaPanel.module.css": {
+      "sha256": "a8e9044a973eca81ab49ba0bac19aea6c8b41d6e1bdef44fa831eebe78618842",
+      "mode": 420
+    },
+    "components/DataHubGrafanaPanel.tsx": {
+      "sha256": "7f5e046813a14654fef695f3e49cbbf1a6f5f2582159f2aa6cd8c9aa07f61db0",
+      "mode": 420
+    },
     "components/DataHubHostBridge.test.mjs": {
-      "sha256": "8f05cf23ac629589c584c8392eff45357e7bd693e4526909c89bb86d75e4f017",
+      "sha256": "7a836618f085ceb74a2166bd48d9bcc6ac0c1c131818a1c572961f03c570bce1",
       "mode": 420
     },
     "components/DataHubIngestionBridge.tsx": {
-      "sha256": "0b8ef9fa1ee9429bf1346d0f9ce7415715b628570b08f5fbdd43c8d973fe9070",
+      "sha256": "51daa33784890554641ce1857680ac2356cf5debfe34ae59ec0f8c4648e5fd91",
+      "mode": 420
+    },
+    "components/DataHubQueryReceipt.tsx": {
+      "sha256": "68b175fcb5b11e715b988de7282434337d78003f4045a3f828cc2e0b08601e34",
+      "mode": 420
+    },
+    "components/DataHubSemanticPreview.tsx": {
+      "sha256": "79df293bc8aa350e7e49b04c5230da6a05d8924ec3965c399369172d2ddafd8d",
+      "mode": 420
+    },
+    "components/DataHubSemanticReview.tsx": {
+      "sha256": "691bb4734caf00f6837ada52f1451a1a8cef8da850b4b7d1f631c3b58413a6eb",
+      "mode": 420
+    },
+    "components/DataHubSqlCard.module.css": {
+      "sha256": "727930c236ae510c48812ee348ecc163e8e166dced7bda6529e23ae77bf12ead",
+      "mode": 420
+    },
+    "components/DataHubSqlCard.tsx": {
+      "sha256": "a783fc14db386ec7237f90610dd8f0bcc02e7e4448d8231b1fff8ea16a724e7c",
       "mode": 420
     },
     "components/DirectoryPicker.tsx": {
@@ -598,11 +615,11 @@
       "mode": 420
     },
     "components/MessageView.test.mjs": {
-      "sha256": "fb66426ce76697c0ef25e94c6edb182244fabc4539856d2e8520b6c31743434e",
+      "sha256": "07708e8d76925aa677ad1ff498fb02a98e3efe90249b1d87522a5c7cd0fd4ee1",
       "mode": 420
     },
     "components/MessageView.tsx": {
-      "sha256": "467334f66bdd881d2800dbb6dae7895128fc98300dd9bba1d046e6f8a6077caa",
+      "sha256": "45185019e66035cf22a61689dacad9a4547f73e550f2f29af7da7841f289487d",
       "mode": 420
     },
     "components/MobilePwaLayout.test.mjs": {
@@ -802,7 +819,7 @@
       "mode": 420
     },
     "e2e/run.mjs": {
-      "sha256": "865a588bc2ae5a05412dc65713c6817969a2fa21c41e1af93a2a6bd6006da8fe",
+      "sha256": "ada3c611adbade9198e62fbfbbdc9721c3804cbc4cfa6314c4e5e88f6dcc4a30",
       "mode": 420
     },
     "e2e/terminal.mjs": {
@@ -834,7 +851,7 @@
       "mode": 420
     },
     "hooks/useAgentSession.ts": {
-      "sha256": "71672c0e10fa1e8a06c581d0a42f7e860a4f0046295fe15a8cbdd90894a46268",
+      "sha256": "86e1883ee33011b1240fc1901574da877a550529cc98bb472c29a4bc83fe1413",
       "mode": 420
     },
     "hooks/useAudio.ts": {
@@ -969,6 +986,22 @@
       "sha256": "d06d05b98b9dd5e8087719d3454f711b0ca1336b3c2e7a96497700a17c697c71",
       "mode": 420
     },
+    "lib/catalog-context.ts": {
+      "sha256": "b09e035bff4a748cd575f04982ca5333f30c67b00216f7c8bc83c739e677a1eb",
+      "mode": 420
+    },
+    "lib/catalog-contract.ts": {
+      "sha256": "6a0ae6813d3f8c346ac81e2ef7899dd1345ddfaff71b60adda9be3202d7fa7e6",
+      "mode": 420
+    },
+    "lib/catalog-icon-paths.ts": {
+      "sha256": "92de683e1e0145be6aa538318164a795841e943866bde39130a0ca0ff593d363",
+      "mode": 420
+    },
+    "lib/catalog-lineage.ts": {
+      "sha256": "fe28d8178064ef6088818b7d3612f595c956c4c100838b10c149842cfc59265f",
+      "mode": 420
+    },
     "lib/chat-lazy-load.test.mjs": {
       "sha256": "ac9e1a671c7fa15657a3b940a07364f57bedf39e6cc3bd7e5ebf83db609118c1",
       "mode": 420
@@ -1013,6 +1046,22 @@
       "sha256": "cd56d3bb156c2e3522069cf59641aef1db855b0c78baa04bda2937cf012162a5",
       "mode": 420
     },
+    "lib/dashboard-draft-contract.ts": {
+      "sha256": "17ce8b868dd38470c97cda6c0a4375cc5dba4732912efb2c1eb979575e8a8669",
+      "mode": 420
+    },
+    "lib/datahub-catalog-extension.ts": {
+      "sha256": "c5734bb5c5c4f91a9a9cbfb76fc12311751a2ffc7c4410ec45f0415adb13a65e",
+      "mode": 420
+    },
+    "lib/datahub-dashboard-extension.test.mjs": {
+      "sha256": "0bbd0172d9f32e74cdabaae1dad940845d898aaf850271a947dfd818554eabe1",
+      "mode": 420
+    },
+    "lib/datahub-dashboard-extension.ts": {
+      "sha256": "9b745f2d0ffa4a369ce9475e26e7339e670a70e85887fbeeba7eefa898069126",
+      "mode": 420
+    },
     "lib/datahub-decision-extension.ts": {
       "sha256": "3098707d489f38be7c4863265b517b46e7a864c9e6ec58739261b91c96884637",
       "mode": 420
@@ -1021,12 +1070,36 @@
       "sha256": "4cf58ec09e67526d146bbaf5213b874275cdc69e75b14fba686294a4fc6c058d",
       "mode": 420
     },
+    "lib/datahub-etl-extension.ts": {
+      "sha256": "18cae8d054287a19b3d0f2a39b10b0093c4672085263d05e33d6590a72f4be71",
+      "mode": 420
+    },
     "lib/datahub-extension-entry.ts": {
-      "sha256": "9551d1163695741bec8cbbff466c1ffde30789644a244d491f72ab74c3d132de",
+      "sha256": "654a9d2407e7614cba637de98a67f811d9b1020847ccabce3d52571047091a7d",
+      "mode": 420
+    },
+    "lib/datahub-grafana-extension.test.mjs": {
+      "sha256": "79cbb4f9280bd47dbb37f0a7373039f30d880666f399585eb860664620e4c176",
+      "mode": 420
+    },
+    "lib/datahub-grafana-extension.ts": {
+      "sha256": "794825b1f0054748afd6b228ca04f28004306dc53b4e33237ec93acb001ee0c7",
       "mode": 420
     },
     "lib/datahub-ingestion-extension.ts": {
       "sha256": "aab6dadc3dda957a868f30e0b1f26cd8ad5b9ab1e9b4b3812a68cdc09b557f14",
+      "mode": 420
+    },
+    "lib/datahub-query-extension.test.mjs": {
+      "sha256": "140f09752201a6d2e9e4746fd1561e5246125f8d3ad225eb4b59f1a3c28b247f",
+      "mode": 420
+    },
+    "lib/datahub-semantic-extension.ts": {
+      "sha256": "5fce632ccd2af49faa06a0d5243638c351c038c460882480f5672d5099fc9498",
+      "mode": 420
+    },
+    "lib/datahub-sql-extension.ts": {
+      "sha256": "ca26775506fadcb71453204bbeb2884cd427ff401febceb1f143eec9c6eef90d",
       "mode": 420
     },
     "lib/directory-browser.test.mjs": {
@@ -1038,7 +1111,7 @@
       "mode": 420
     },
     "lib/draft-store.ts": {
-      "sha256": "99fce6f5c55733b6e5f701072623cc1dabb6165d2a841134a66953555091ada2",
+      "sha256": "9c710024109f08d763c42ed769be54c9a7ebde45a05943575bc667b688614991",
       "mode": 420
     },
     "lib/file-access.test.mjs": {
@@ -1133,6 +1206,14 @@
       "sha256": "5c1d3dc8f81618db051629f7059daa54df63e014f714a32feb92b523a3fcdafc",
       "mode": 420
     },
+    "lib/grafana-context.ts": {
+      "sha256": "c3fa10789923fd09634609acb721b299ad5fcd5d88f865a82b0cec84b5f68b8e",
+      "mode": 420
+    },
+    "lib/grafana-embed-contract.ts": {
+      "sha256": "e7cff478aee76a8d300805c8d999f6bfce38149a9ccf2d6a05980d5d3c434d74",
+      "mode": 420
+    },
     "lib/http-dispatcher.test.mjs": {
       "sha256": "4f2ec107a9ab9c7a381c9ab8b0f58c87cec49be9ee7ba3b2202765884bbf018f",
       "mode": 420
@@ -1150,15 +1231,15 @@
       "mode": 420
     },
     "lib/i18n/messages/en.ts": {
-      "sha256": "faffdfcd47b70583ef7918159738859f95f8ff4053c8002b30fc87c42410afe9",
+      "sha256": "765fa3fd2685d34943ec4eb11d3147fb1c81a177e01a3e09aaa54b6ef7a8e94a",
       "mode": 420
     },
     "lib/i18n/messages/zh-CN.ts": {
-      "sha256": "3b97a07aa7dc7621ec66908d541ae152e91c8ef96f027c905d41cbd17f8fbca4",
+      "sha256": "a9a407c4c3b5c1c008ef7720ed4f15f50bad9a14cbabba21218449659c5de515",
       "mode": 420
     },
     "lib/i18n/messages/zh-TW.ts": {
-      "sha256": "f5287ec0afb7701415a0db1c96aa38819eaef3207edca6d200fb2a65a6d5ba73",
+      "sha256": "fb9b1e278bc79d01c8e8177825435600839afd562da0aa4a7d48409ecebb6333",
       "mode": 420
     },
     "lib/i18n/registry.test.mjs": {
@@ -1413,6 +1494,14 @@
       "sha256": "cbd75c24ba93bfa3fa4953d907286d63da2a7fbbe58ba56c819f9899fa8480a6",
       "mode": 420
     },
+    "lib/query-contract.ts": {
+      "sha256": "15f375484a3b6af0aa9244924750dcc3efd699435a7b30f1e5e44312392eb319",
+      "mode": 420
+    },
+    "lib/query-schema.ts": {
+      "sha256": "940716b9d95025cbd0a2537cd54ceba0bda55c3c7896fb7cec3402ae0439049b",
+      "mode": 420
+    },
     "lib/quoted-selection.test.mjs": {
       "sha256": "405fdfcfa4620ba049039a7628090a3f08799ca64a78b4578dabea0f7683f945",
       "mode": 420
@@ -1446,11 +1535,11 @@
       "mode": 420
     },
     "lib/rpc-manager.test.mjs": {
-      "sha256": "078e675f367fde646c3004f3fd542b75e0f5cfe96982f872279cedf55f286fc0",
+      "sha256": "e171dbe3006aeb5c48959f041f395ad5d51fbc6f75e588f79e76d6c34f3cbe40",
       "mode": 420
     },
     "lib/rpc-manager.ts": {
-      "sha256": "799f5e40f593e9005d86b7ae2b6689c1f6f9e5a4647b7c29279054c0894580a7",
+      "sha256": "a42f7959631fcc5fd725b4a56d264a411287274b115da528b2a83f6a88f77628",
       "mode": 420
     },
     "lib/rpc-session-info.test.mjs": {
@@ -1566,11 +1655,11 @@
       "mode": 420
     },
     "lib/session-tool-selection.test.mjs": {
-      "sha256": "2df082d9036155df53aff8378fc3973502a8f74ae5935ed65d750aa877e9f853",
+      "sha256": "c357f41638fab193288e63fb2ac1da6842733eaf2917749ca61a38a67c67cb4e",
       "mode": 420
     },
     "lib/session-tool-selection.ts": {
-      "sha256": "67493a9013affd20f6f65bdef6daf1b62025c810c05ee9958d8f58cebd845233",
+      "sha256": "12492fde02f4c30c3312546a9d96fa8e6506a155e9edd8889670275175588dec",
       "mode": 420
     },
     "lib/session-tree.test.mjs": {
@@ -1623,6 +1712,10 @@
     },
     "lib/slash-display.ts": {
       "sha256": "f7b7b3592c0b9ff2b2eb2d851a4035a194227b0e9958e9e65502f8baa92ec6c1",
+      "mode": 420
+    },
+    "lib/sql-contract.ts": {
+      "sha256": "5ffef89ccca7ea13d21f15c5c7e5a2cce8e25f83563e5673ffa0af391d3498f4",
       "mode": 420
     },
     "lib/startup-preferences.test.mjs": {
@@ -1758,11 +1851,11 @@
       "mode": 420
     },
     "lib/tool-presets.test.mjs": {
-      "sha256": "9c614b6401a79d6fb0d40216f3ca769eac27056cdbefd497c2d1268905e286e2",
+      "sha256": "844cc12d6a27ec474a079630de1429947952095226972714247330a4d63292ce",
       "mode": 420
     },
     "lib/tool-presets.ts": {
-      "sha256": "6c763be58a5989e36dac3659181aca87581c6f9e89eddf3f2c6ce63ba22e3b21",
+      "sha256": "fa799237320efca8a52547c2753fa7781f3b73044b7e9e13da61a6ad148657d3",
       "mode": 420
     },
     "lib/tool-result-images.ts": {
@@ -2113,6 +2206,10 @@
       "sha256": "bab32f00d56c2a8f9c9266cda85d1ab757ace03242d7b26a745f8cae349e6ac9",
       "mode": 420
     },
+    "public/licenses/PHOSPHOR-LICENSE.txt": {
+      "sha256": "6918b72504641180600cbbd4a86b0dfa9dfccf788775694325b71b9a029f6eb4",
+      "mode": 420
+    },
     "public/offline.html": {
       "sha256": "916ee789831a57b5648d3daf2e4f7ec446c7750051d7e4ed6b0a67befb6f6349",
       "mode": 420
@@ -2127,6 +2224,14 @@
     },
     "public/sw.test.mjs": {
       "sha256": "3286944c45175efdff554e876d9637f4258e160c3f1b90a745a964904b47d189",
+      "mode": 420
+    },
+    "skills/datahub-etl/SKILL.md": {
+      "sha256": "b83477c822c2637416fbf7d0ce9ba278637fb859f7b8e18894655030ad523082",
+      "mode": 420
+    },
+    "skills/datahub-semantic/SKILL.md": {
+      "sha256": "101220c2cb0a1e94083bccc6e869e6c28eb92c49afa2160a2d5ab5dac76bccd9",
       "mode": 420
     },
     "tailwind.config.ts": {

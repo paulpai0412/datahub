@@ -12,7 +12,10 @@ const code = `
 const fs=require('node:fs/promises'), path=require('node:path'), crypto=require('node:crypto');
 (async()=>{
   const hash=async p=>crypto.createHash('sha256').update(await fs.readFile(p)).digest('hex');
-  const root='/app/.next/static', assets={'/index.html':await hash('/app/.next/server/app/index.html')};
+  const root='/app/.next/static', assets={
+    '/index.html':await hash('/app/.next/server/app/index.html'),
+    '/_next/static/licenses/PHOSPHOR-LICENSE.txt':await hash('/app/public/licenses/PHOSPHOR-LICENSE.txt'),
+  };
   for(const entry of await fs.readdir(root,{recursive:true,withFileTypes:true})) if(entry.isFile()) {
     const p=path.join(entry.parentPath,entry.name); assets['/_next/static/'+path.relative(root,p)]=await hash(p);
   }

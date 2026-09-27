@@ -15,6 +15,26 @@ GO
 USE [SalesDatamart];
 GO
 
+-- Refuse a same-name wrong-type object before changing an existing database.
+-- This does not verify the columns or constraints of an existing table.
+IF EXISTS (
+    SELECT 1
+    FROM (VALUES
+        (N'dm', N'dim_date', N'U'),
+        (N'dm', N'dim_territory', N'U'),
+        (N'dm', N'dim_product', N'U'),
+        (N'dm', N'dim_customer', N'U'),
+        (N'dm', N'fact_sales_order_line', N'U'),
+        (N'reporting', N'v_sales_order_line', N'V')
+    ) AS expected([schema_name], [object_name], [object_type])
+    JOIN sys.schemas AS s ON s.[name] = expected.[schema_name]
+    JOIN sys.objects AS o ON o.[schema_id] = s.[schema_id]
+                         AND o.[name] = expected.[object_name]
+    WHERE o.[type] <> expected.[object_type]
+)
+    THROW 51004, 'SalesDatamart target object type conflict; reconcile before schema changes', 1;
+GO
+
 IF SCHEMA_ID(N'dm') IS NULL
     EXEC(N'CREATE SCHEMA [dm] AUTHORIZATION [dbo]');
 GO
@@ -166,19 +186,20 @@ BEGIN
 END;
 GO
 
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'IX_fact_sales_order_line_OrderDateKey')
+-- Index names are per table: another table's index cannot satisfy this fact table.
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [object_id] = OBJECT_ID(N'dm.fact_sales_order_line', N'U') AND [name] = N'IX_fact_sales_order_line_OrderDateKey')
     CREATE INDEX [IX_fact_sales_order_line_OrderDateKey]
         ON [dm].[fact_sales_order_line] ([OrderDateKey]);
 GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'IX_fact_sales_order_line_ProductKey')
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [object_id] = OBJECT_ID(N'dm.fact_sales_order_line', N'U') AND [name] = N'IX_fact_sales_order_line_ProductKey')
     CREATE INDEX [IX_fact_sales_order_line_ProductKey]
         ON [dm].[fact_sales_order_line] ([ProductKey]);
 GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'IX_fact_sales_order_line_CustomerKey')
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [object_id] = OBJECT_ID(N'dm.fact_sales_order_line', N'U') AND [name] = N'IX_fact_sales_order_line_CustomerKey')
     CREATE INDEX [IX_fact_sales_order_line_CustomerKey]
         ON [dm].[fact_sales_order_line] ([CustomerKey]);
 GO
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [name] = N'IX_fact_sales_order_line_TerritoryKey')
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE [object_id] = OBJECT_ID(N'dm.fact_sales_order_line', N'U') AND [name] = N'IX_fact_sales_order_line_TerritoryKey')
     CREATE INDEX [IX_fact_sales_order_line_TerritoryKey]
         ON [dm].[fact_sales_order_line] ([TerritoryKey]);
 GO

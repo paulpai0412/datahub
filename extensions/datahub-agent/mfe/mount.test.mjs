@@ -28,6 +28,8 @@ test("MFE bootstrap contract (synthetic DOM and gateway, not browser E2E)", asyn
   const children = [];
   globalThis.__webpack_public_path__ = "http://localhost:30150/mfe/";
   globalThis.document = {
+    addEventListener() {},
+    removeEventListener() {},
     createElement(tag) {
       const element = Object.assign(new EventTarget(), {
         tag,

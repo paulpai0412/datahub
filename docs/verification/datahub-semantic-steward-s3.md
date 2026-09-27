@@ -2,7 +2,9 @@
 
 2026-09-22；工作樹 `feat/semantic-steward`，基準 `a25204e`。設計見 `docs/research/datahub-semantic-steward.md` §14。
 
-**狀態：本地實作／合成閉環已驗，尚未部署或完成真模型／真 DataHub 發布驗收；S4 未實作。** 本段新增 live calls、SQL、metadata writes、ingestion、部署均為 0。先前已核准的一次 ingestion 已成功且授權用盡，不能重送。
+> **歷史 S3 本地快照**：下列「尚未部署／真發布」是 2026-09-22 當時狀態；其後已在真入口完成一次人工核准的單欄原生發布與讀回，詳舊 `TODO-309f35c7` 最後 live acceptance 節。舊任務以 superseded 關閉，尚缺的 S4 三方代管與原生稽核 ACL 由 `TODO-2a8a0cf6` 承接；同源交付另見 `TODO-db4b9c85`。單欄成功不代表 S4 已驗收。
+
+**當時狀態：本地實作／合成閉環已驗，尚未部署或完成真模型／真 DataHub 發布驗收；S4 未實作。** 本段新增 live calls、SQL、metadata writes、ingestion、部署均為 0。先前已核准的一次 ingestion 已成功且授權用盡，不能重送。
 
 ## 已接通
 
@@ -26,7 +28,7 @@ Source operator policy 的 `semanticPublicationApproved` 預設無權限，需�
 證據根目錄為工作樹 `.local/evidence/semantic-steward/s3/`；原失敗與前次收據保留。
 
 | 檢查 | 結果及實際涵蓋 |
-|---|---|
+| --- | --- |
 | Semantic、Task records、Gateway、Ingestion、MFE mount、Host bridge | **169/169 PASS**，`integration-final.log` |
 | 擴大 Discovery 回歸 | **20/21 PASS**；原有 `analysisVersion 1.0.3 !== 1.0.2` 失敗，兩個正式檔案均與初始 baseline 相同；未改測試掩蓋 |
 | pi-web TypeScript | `tsc --noEmit --incremental false` exit 0 |

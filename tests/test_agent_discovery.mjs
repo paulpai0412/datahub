@@ -168,7 +168,7 @@ test("real isolated Python capture/page bridge: no source execution, digest-boun
   assert.equal(first.candidates.length, 1);
   assert.equal(first.nextOffset, 1);
   assert.equal(first.publicationAuthorized, false);
-  assert.equal(first.analysisVersion, "1.0.2");
+  assert.equal(first.analysisVersion, "1.0.3");
   assert.ok(!JSON.stringify(first).includes(root));
   const second = await analyzeDiscovery(selected, {
     offset: first.nextOffset,

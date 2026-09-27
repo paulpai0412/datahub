@@ -6,8 +6,18 @@ import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
 import { DataHubEtlPreview, isEtlPreview } from "./DataHubEtlPreview";
-import { DataHubSemanticPreview, isSemanticPreview } from "./DataHubSemanticPreview";
-import { DataHubSemanticReview, isSemanticReview } from "./DataHubSemanticReview";
+import {
+  DataHubSemanticPreview,
+  isSemanticPreview,
+} from "./DataHubSemanticPreview";
+import {
+  DataHubSemanticReview,
+  isSemanticReview,
+} from "./DataHubSemanticReview";
+import { DataHubCatalogCards } from "./DataHubCatalog";
+import { DataHubSqlCard } from "./DataHubSqlCard";
+import { DataHubDashboardDraft } from "./DataHubDashboardDraft";
+import { DataHubGrafanaMessage } from "./DataHubGrafanaPanel";
 import { copyText } from "@/lib/clipboard";
 import { useI18n } from "@/hooks/useI18n";
 import { parseCompactionSummary } from "@/lib/compaction-summary";
@@ -1586,13 +1596,55 @@ function ToolCallBlock({
       ? result.details
       : null;
   const semanticPreview =
-    block.toolName === "datahub_semantic" && !isError && isSemanticPreview(result?.details)
+    block.toolName === "datahub_semantic" &&
+    !isError &&
+    isSemanticPreview(result?.details)
       ? result.details
       : null;
   const semanticReview =
-    block.toolName === "datahub_semantic" && !isError && isSemanticReview(result?.details)
+    block.toolName === "datahub_semantic" &&
+    !isError &&
+    isSemanticReview(result?.details)
       ? result.details
       : null;
+
+  if (block.toolName === "datahub_catalog") {
+    return (
+      <DataHubCatalogCards
+        value={result?.details}
+        pending={!result}
+        error={isError ? (resultText ?? "catalog_unavailable") : undefined}
+      />
+    );
+  }
+  if (block.toolName === "datahub_sql") {
+    // Never render raw tool input, failure text, or unknown historical details.
+    return (
+      <DataHubSqlCard
+        value={result?.details}
+        pending={!result}
+        error={isError ? "sql_failed" : undefined}
+      />
+    );
+  }
+  if (block.toolName === "datahub_grafana") {
+    return (
+      <DataHubGrafanaMessage
+        value={result?.details}
+        pending={!result}
+        error={isError ? "grafana_failed" : undefined}
+      />
+    );
+  }
+  if (block.toolName === "datahub_dashboard") {
+    return (
+      <DataHubDashboardDraft
+        value={result?.details}
+        pending={!result}
+        error={isError ? "dashboard_failed" : undefined}
+      />
+    );
+  }
 
   return (
     <div

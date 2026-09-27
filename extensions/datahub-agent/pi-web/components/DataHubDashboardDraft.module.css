@@ -1,0 +1,119 @@
+.dashboard {
+  max-width: 760px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-panel);
+  color: var(--text);
+}
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.kicker,
+.panelLabel {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.header h3 {
+  margin: 3px 0 0;
+  font-size: 17px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.badge {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+.panels {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px 16px;
+}
+.panel {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.panel h4 {
+  margin: 8px 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 95px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.empty strong {
+  font-size: 24px;
+  line-height: 1.1;
+}
+.panel p,
+.notice,
+.footer {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.panel p {
+  margin: 12px 0 0;
+}
+.panel dl {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+.panel dl div {
+  margin-top: 9px;
+}
+.panel dt {
+  color: var(--text-muted);
+}
+.panel dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.notice {
+  margin: 0;
+  padding: 20px 16px;
+}
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 5px 14px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+}
+.footer strong {
+  font-weight: 500;
+}
+@media (max-width: 600px) {
+  .panels {
+    grid-template-columns: 1fr;
+  }
+  .header,
+  .panels,
+  .footer {
+    padding-inline: 12px;
+  }
+}

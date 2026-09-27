@@ -15,6 +15,9 @@ export function isDataHubHostRequest(
       "DataHub import readback",
       "DataHub discovery request",
       "DataHub semantic request",
+      "DataHub catalog request",
+      "DataHub SQL request",
+      "DataHub Grafana request",
     ].includes(request.title)
   );
 }
@@ -107,7 +110,13 @@ export function DataHubHostBridge({
                     ? "datahub-discovery"
                     : request.title === "DataHub semantic request"
                       ? "datahub-semantic"
-                      : "datahub-ingestion",
+                      : request.title === "DataHub catalog request"
+                        ? "datahub-catalog"
+                        : request.title === "DataHub SQL request"
+                          ? "datahub-sql"
+                          : request.title === "DataHub Grafana request"
+                            ? "datahub-grafana"
+                            : "datahub-ingestion",
           body: request.placeholder,
           uiRequestId: request.id,
         },
@@ -152,7 +161,13 @@ export function DataHubHostBridge({
         }}
       >
         {notice ??
-          "Waiting for the trusted DataHub host. Source confirmations and Task decisions are handled outside this workspace."}
+          (request.title === "DataHub Grafana request"
+            ? "正在核對 Grafana 顯示權限（不執行 SQL）…"
+            : request.title === "DataHub catalog request"
+              ? "正在以目前 DataHub 身分唯讀查詢…"
+              : request.title === "DataHub SQL request"
+                ? "正在請可信 Host 核權並執行有界查詢…"
+                : "Waiting for the trusted DataHub host. Source confirmations and Task decisions are handled outside this workspace.")}
       </p>
     </div>
   );

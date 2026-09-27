@@ -269,7 +269,10 @@ def main() -> int:
         else:
             raise BridgeError("discovery_publication_rejected")
         serialized = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
-        if operation == "workspace_analyze" and len(serialized.encode("utf-8")) > 56000:
+        # The Host caps its final preview at 60,000 bytes; allow the 13-dataset
+        # workspace field graph to reach it while reserving room for the
+        # native-diff summary, request ID and observation timestamp.
+        if operation == "workspace_analyze" and len(serialized.encode("utf-8")) > 58000:
             raise BridgeError("discovery_workspace_too_large")
         print(serialized)
     except BridgeError as error:

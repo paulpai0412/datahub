@@ -4,6 +4,10 @@ import decision from "./datahub-decision-extension";
 import discovery from "./datahub-discovery-extension";
 import etl from "./datahub-etl-extension";
 import semantic from "./datahub-semantic-extension";
+import catalog from "./datahub-catalog-extension";
+import sql from "./datahub-sql-extension";
+import dashboard from "./datahub-dashboard-extension";
+import grafana from "./datahub-grafana-extension";
 
 /** Fixed first-party entry; the pinned MCP adapter implementation is unchanged. */
 export default async function datahubExtensions(pi: ExtensionAPI) {
@@ -25,4 +29,8 @@ export default async function datahubExtensions(pi: ExtensionAPI) {
   discovery(pi);
   etl(pi);
   semantic(pi);
+  catalog(pi);
+  sql(pi);
+  dashboard(pi);
+  grafana(pi);
 }

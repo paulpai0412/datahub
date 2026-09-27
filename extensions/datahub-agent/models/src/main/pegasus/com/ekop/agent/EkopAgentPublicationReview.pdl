@@ -20,6 +20,12 @@ record EkopAgentPublicationReview {
   /** Same prospective Host-approved scope as the Task, not creation authority. */
   @UrnValidation = { "entityTypes": [ "dataset" ], "exist": false }
   datasets: array[Urn]
+  /** Exact Catalog scope for the private Semantic path. Non-Dataset assets
+   * must not be placed in datasets or represented as ingestion membership.
+   * Absent on legacy reviews; only a catalog-aware Host compiler can admit it.
+   */
+  @UrnValidation = { "entityTypes": [ "dataset", "container", "dataFlow", "dataJob", "chart", "dashboard" ] }
+  assets: optional array[Urn]
   expiresAt: long
   changes: array[EkopAgentPublicationChange]
   /** Optional typed Steward intent, projected evidence and version guards.
