@@ -173,6 +173,7 @@ const TOOL_PRESETS = [
   "read-only",
   "default",
   "full",
+  "plugin-dev",
 ] as const;
 type ToolPresetLabel = (typeof TOOL_PRESETS)[number];
 const TOOL_PRESET_MAP: Record<ToolPresetLabel, ToolPreset> = {
@@ -181,6 +182,7 @@ const TOOL_PRESET_MAP: Record<ToolPresetLabel, ToolPreset> = {
   "read-only": "read-only",
   default: "default",
   full: "full",
+  "plugin-dev": "plugin-dev",
 };
 const COMPOSITION_END_ENTER_GRACE_MS = 100;
 const TEXT_COLLATOR = new Intl.Collator(undefined, {
@@ -3698,6 +3700,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                             desc = t("chat.readOnlyTools", { count: 4 });
                           else if (lvl === "default")
                             desc = t("chat.builtInTools", { count: 4 });
+                          else if (lvl === "plugin-dev")
+                            desc = "Discovery plugin authoring only";
                           else desc = t("chat.allBuiltInTools");
                           return (
                             <button

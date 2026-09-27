@@ -39,7 +39,39 @@ def main(argv: list[str] | None = None) -> int:
     validate_parser.add_argument("--analysis", required=True, type=Path)
     validate_parser.add_argument("--path", action="append", dest="paths")
 
+    subparsers.add_parser("plugins", help="List fixed first-party plugins; no dynamic loading")
+    plugin_parser = subparsers.add_parser("plugin-analyze", help="Operator-only, source-bound plugin preview")
+    plugin_parser.add_argument("--plugin", required=True)
+    plugin_parser.add_argument("--root", required=True)
+    plugin_parser.add_argument("--source-id", required=True)
+    plugin_parser.add_argument("--path", action="append", dest="paths")
+    plugin_parser.add_argument("--config-json", default="{}", help="Nonsecret plugin configuration only")
+
     args = parser.parse_args(argv)
+    if args.command in {"plugins", "plugin-analyze"}:
+        from .plugin_api import PluginError, contract_digest
+        from .plugins.registry import builtin_registry
+        from .snapshot import SnapshotError
+        try:
+            registry = builtin_registry()
+            if args.command == "plugins":
+                output = {"contractVersion": "1", "contractDigest": contract_digest(), "plugins": registry.manifests()}
+            else:
+                paths = _paths(parser, args.paths)
+                config = json.loads(args.config_json)
+                # Check selection before reading source; a rejected ID grants no capture.
+                if args.plugin not in {item["id"] for item in registry.manifests()}:
+                    raise PluginError("plugin_not_registered")
+                snapshot = capture_snapshot(args.root, paths, source_id=args.source_id)
+                output = registry.analyze(args.plugin, snapshot, config)
+            print(json.dumps(output, ensure_ascii=False, sort_keys=True))
+            return 0
+        except (PluginError, SnapshotError) as error:
+            print(json.dumps({"status": "FAIL", "code": str(error)}))
+            return 2
+        except (ValueError, TypeError):
+            print(json.dumps({"status": "FAIL", "code": "plugin_config_invalid"}))
+            return 2
     paths = _paths(parser, args.paths)
     if args.command == "analyze":
         receipt = capture_and_analyze(args.root, paths, source_id=args.source_id)

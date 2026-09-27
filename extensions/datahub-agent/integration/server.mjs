@@ -40,6 +40,7 @@ import {
 
 const fields = new Set([
   "scope",
+  "readOnlyCore",
   "runtimeImageId",
   "gatewayOrigin",
   "datahubOrigin",
@@ -51,6 +52,8 @@ const fields = new Set([
   "egressOriginsByActor",
   "ingestionSourcesByActor",
   "discoverySourcesByActor",
+  "pluginDevelopmentByActor",
+  "pluginActivationsByActor",
   "fixedEtlGrantsByActor",
   "catalogReadByActor",
   "sqlSourceOnlyGrantsByActor",
@@ -103,6 +106,14 @@ export async function startAgentServer(config) {
   ) {
     throw new Error("invalid_agent_server_configuration");
   }
+  if (config.readOnlyCore !== undefined && typeof config.readOnlyCore !== "boolean")
+    throw new Error("invalid_read_only_core_configuration");
+  if (config.readOnlyCore && [
+    "ingestionSourcesByActor", "fixedEtlGrantsByActor", "sqlSourceOnlyGrantsByActor",
+    "sqlPasswordPath", "grafanaDisplaysByActor", "grafanaServiceKeyPath",
+    "queryConnections", "queryGrafana",
+  ].some(name => config[name] !== undefined))
+    throw new Error("read_only_core_configuration_conflict");
   const policies =
     config.egressOriginsByActor === undefined
       ? {}
@@ -134,6 +145,29 @@ export async function startAgentServer(config) {
     throw new Error("query_legacy_configuration_conflict");
   if (!generalQuery && queryConnections.length)
     throw new Error("query_grafana_configuration_required");
+  const pluginScopes = new Map();
+  const development = config.pluginDevelopmentByActor === undefined ? {} : config.pluginDevelopmentByActor;
+  if (!development || typeof development !== "object" || Array.isArray(development)) throw new Error("invalid_plugin_development_configuration");
+  if (Object.keys(development).length) {
+    const { createPluginDevelopment } = await import("./plugin-development.mjs");
+    for (const [key, policy] of Object.entries(development)) {
+      if (!/^[a-f0-9]{48}$/.test(key) || !policy || typeof policy !== "object" || Array.isArray(policy) ||
+          Object.keys(policy).some(name => !["referenceSourceId", "image", "evidenceRoot"].includes(name)) ||
+          !(discoveryScopes.get(key) ?? []).some(source => source.sourceId === policy.referenceSourceId && source.workspace && source.modelContextApproved)) {
+        throw new Error("invalid_plugin_development_configuration");
+      }
+      pluginScopes.set(key, createPluginDevelopment({ ...policy, actors: [{ tenant: config.tenant, key }] }));
+    }
+  }
+  const activationScopes = new Map();
+  if (config.pluginActivationsByActor !== undefined) {
+    const { pluginActivationPolicies, createPluginActivations } = await import("./plugin-activation.mjs");
+    for (const [key, entries] of pluginActivationPolicies(config.pluginActivationsByActor, development, discoveryScopes)) {
+      const policy = development[key];
+      activationScopes.set(key, createPluginActivations({ actor: { tenant: config.tenant, key }, entries,
+        development: pluginScopes.get(key), evidenceRoot: policy.evidenceRoot, image: policy.image }));
+    }
+  }
   const sqlScopes = sqlPolicies(config.sqlSourceOnlyGrantsByActor, {
     sourceOnly: true,
   });
@@ -268,6 +302,7 @@ export async function startAgentServer(config) {
       memoryMiB: config.memoryMiB,
       cpus: config.cpus,
       maxRuntimes: config.maxRuntimes,
+      pluginDevelopmentActors: [...pluginScopes.keys()],
     });
     server = await createAgentGateway({
       gatewayOrigin: config.gatewayOrigin,
@@ -300,13 +335,13 @@ export async function startAgentServer(config) {
           frontendOrigin: config.datahubOrigin,
         });
       },
-      ingestionRequest: (text, context) =>
+      ingestionRequest: config.readOnlyCore ? undefined : (text, context) =>
         nativeIngestion(text, {
           ...context,
           sources: sourcePolicies.get(context.actor.key) ?? [],
           frontendOrigin: config.datahubOrigin,
         }),
-      semanticRequest: (text, context) =>
+      semanticRequest: config.readOnlyCore ? undefined : (text, context) =>
         analyzeBounded(
           context.actor,
           new SemanticError("semantic_capacity_exhausted", 429),
@@ -334,12 +369,15 @@ export async function startAgentServer(config) {
             nativeDiscovery(text, {
               actor: context.actor,
               assertActive: context.assertActive,
+              signal: context.signal,
+              pluginDevelopment: pluginScopes.get(context.actor.key),
+              pluginActivations: activationScopes.get(context.actor.key),
               sources: discoveryScopes.get(context.actor.key) ?? [],
               frontendOrigin: config.datahubOrigin,
               cookieHeader: context.cookieHeader,
             }),
         ),
-      taskRequest: async (text, context) => {
+      taskRequest: config.readOnlyCore ? undefined : async (text, context) => {
         const compiling = [
           "prepare_workspace_import",
           "respond_workspace_import",

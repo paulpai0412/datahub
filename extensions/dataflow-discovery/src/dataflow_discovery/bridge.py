@@ -245,22 +245,33 @@ def main() -> int:
             raise BridgeError("discovery_policy_too_large")
         payload = json.loads(raw)
         operation = payload.get("operation", "analyze")
-        if operation in {"workspace_analyze", "workspace_compile"} and set(payload) in (
+        if operation in {"workspace_analyze", "workspace_compile", "plugin_workspace_input"} and set(payload) in (
                 {"operation", "policy", "request"}, {"operation", "policy", "request", "catalog"},
                 {"operation", "policy", "request", "catalog", "relatedCatalog"}):
-            workspace = importlib.import_module("dataflow_discovery.workspace")
+            workspace = importlib.import_module("dataflow_discovery.plugin_workspace")
             try:
-                result = workspace.analyze_workspace(payload["policy"], payload["request"], payload.get("catalog"),
-                                                     compile_native=operation == 'workspace_compile', related_catalog=payload.get('relatedCatalog'))
+                if operation == "plugin_workspace_input":
+                    if set(payload) != {"operation", "policy", "request"}:
+                        raise ValueError("plugin_workspace_request_rejected")
+                    result = workspace.capture_plugin_input(payload["policy"], payload["request"])
+                else:
+                    result = workspace.analyze_workspace_selection(payload["policy"], payload["request"], payload.get("catalog"),
+                                                         compile_native=operation == 'workspace_compile', related_catalog=payload.get('relatedCatalog'))
             except ValueError as error:
                 reason = str(error)
                 if reason not in {"workspace_source_drift", "workspace_entrypoint_rejected",
                                   "workspace_scope_rejected", "workspace_lineage_incomplete", "host_connection_selection_required",
                                   "connection_origin_unresolved", "invalid_workspace_selection",
                                   "source_changed_during_capture", "source_unavailable_or_symlink",
-                                  "sensitive_content", "workspace_directory_limit", "workspace_entry_limit"}:
+                                  "sensitive_content", "workspace_directory_limit", "workspace_entry_limit",
+                                  "plugin_not_registered", "plugin_schema_invalid", "plugin_analysis_failed",
+                                  "plugin_result_too_large", "plugin_workspace_request_rejected", "plugin_preview_only"}:
                     reason = "discovery_workspace_rejected"
                 raise BridgeError(reason) from None
+        elif operation == "plugin_development_contract" and set(payload) == {"operation"}:
+            result = importlib.import_module("dataflow_discovery.plugin_workspace").plugin_development_contract()
+        elif operation == "list_plugins" and set(payload) == {"operation"}:
+            result = importlib.import_module("dataflow_discovery.plugin_workspace").list_workspace_plugins()
         elif operation == "compile_publication" and set(payload) in (
                 {"operation", "policy", "plan"}, {"operation", "policy", "plan", "catalog"}):
             result = compile_publication(payload["policy"], payload["plan"], payload.get("catalog"))
@@ -273,6 +284,8 @@ def main() -> int:
         # workspace field graph to reach it while reserving room for the
         # native-diff summary, request ID and observation timestamp.
         if operation == "workspace_analyze" and len(serialized.encode("utf-8")) > 58000:
+            raise BridgeError("discovery_workspace_too_large")
+        if operation == "plugin_workspace_input" and len(serialized.encode("utf-8")) > 131072:
             raise BridgeError("discovery_workspace_too_large")
         print(serialized)
     except BridgeError as error:

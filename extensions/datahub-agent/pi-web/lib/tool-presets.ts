@@ -12,8 +12,21 @@ export const TOOL_PRESET_VALUES = [
   "read-only",
   "default",
   "full",
+  "plugin-dev",
 ] as const;
 export type ToolPreset = (typeof TOOL_PRESET_VALUES)[number];
+export const PLUGIN_DEVELOPMENT_TOOL = "discovery_plugin_dev";
+export const PLUGIN_DEVELOPMENT_TOOLS = [PLUGIN_DEVELOPMENT_TOOL];
+
+export function isPluginDevelopmentSelection(tools: readonly string[] | undefined): boolean {
+  return tools?.includes(PLUGIN_DEVELOPMENT_TOOL) ?? false;
+}
+
+export function validatePluginDevelopmentSelection(tools: readonly string[]): void {
+  if (isPluginDevelopmentSelection(tools) && (tools.length !== 1 || tools[0] !== PLUGIN_DEVELOPMENT_TOOL)) {
+    throw new Error("Plugin development must use its dedicated tool selection only");
+  }
+}
 
 export const PRESET_NONE: string[] = [];
 export const PRESET_DATAHUB_ONLY = [
@@ -51,6 +64,7 @@ export function getPresetFromToolNames(
   toolNames: readonly string[],
 ): ToolPreset {
   if (toolNames.length === 0) return "none";
+  if (toolNames.length === 1 && toolNames[0] === PLUGIN_DEVELOPMENT_TOOL) return "plugin-dev";
   if (
     toolNames.length === PRESET_DATAHUB_ONLY.length &&
     PRESET_DATAHUB_ONLY.every((name) => toolNames.includes(name))
@@ -70,6 +84,7 @@ export function getPresetFromToolNames(
 }
 
 export function getToolNamesForPreset(preset: ToolPreset): string[] {
+  if (preset === "plugin-dev") return [...PLUGIN_DEVELOPMENT_TOOLS];
   if (preset === "none") return [...PRESET_NONE];
   if (preset === "datahub-only") return [...PRESET_DATAHUB_ONLY];
   if (preset === "read-only") return [...PRESET_READ_ONLY];

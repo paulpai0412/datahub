@@ -107,7 +107,7 @@ class WorkspaceAdoptionTests(unittest.TestCase):
             stdout = StringIO()
             with (patch.object(bridge.sys, "stdin", SimpleNamespace(buffer=BytesIO(input_bytes))),
                   patch.object(bridge.importlib, "import_module", return_value=SimpleNamespace(
-                      analyze_workspace=lambda *args, **kwargs: stub)),
+                      analyze_workspace_selection=lambda *args, **kwargs: stub)),
                   redirect_stdout(stdout)):
                 code = bridge.main()
             return code, json.loads(stdout.getvalue())

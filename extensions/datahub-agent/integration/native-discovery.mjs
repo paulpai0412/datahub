@@ -297,12 +297,20 @@ export function discoveryPolicies(value = {}) {
 function parseRequest(text) {
   let request;
   try {
-    if (typeof text !== "string" || Buffer.byteLength(text) > 8192)
+    if (typeof text !== "string" || Buffer.byteLength(text) > 60000)
       throw new Error();
     request = JSON.parse(text);
   } catch {
     throw new DiscoveryError("invalid_discovery_request", 400);
   }
+  if (["plugin_development_contract", "plugin_development_references", "plugin_development_reference", "plugin_development_verify"].includes(request?.action)) {
+    if (!object(request) || typeof request.requestId !== "string" || !requestId.test(request.requestId))
+      throw new DiscoveryError("invalid_discovery_request", 400);
+    // The opt-in service validates the complete closed capsule schema before
+    // any capture/execution. Ordinary Discovery retains its original 8KB cap.
+    return request;
+  }
+  if (Buffer.byteLength(text) > 8192) throw new DiscoveryError("invalid_discovery_request", 400);
   if (
     !only(request, [
       "requestId",
@@ -316,6 +324,8 @@ function parseRequest(text) {
       "entrypoint",
       "snapshotSha256",
       "connections",
+      "pluginId",
+      "pluginConfig",
     ]) ||
     typeof request.requestId !== "string" ||
     !requestId.test(request.requestId) ||
@@ -323,11 +333,12 @@ function parseRequest(text) {
       "list_sources",
       "analyze",
       "list_workspaces",
+      "list_plugins",
       "analyze_workspace",
     ].includes(request.action)
   )
     throw new DiscoveryError("invalid_discovery_request", 400);
-  if (["list_sources", "list_workspaces"].includes(request.action)) {
+  if (["list_sources", "list_workspaces", "list_plugins"].includes(request.action)) {
     if (
       Object.keys(request).some((key) => !["requestId", "action"].includes(key))
     )
@@ -343,12 +354,22 @@ function parseRequest(text) {
         "entrypoint",
         "snapshotSha256",
         "connections",
+        "pluginId",
+        "pluginConfig",
       ]) ||
       typeof request.sourceId !== "string" ||
       !sourceId.test(request.sourceId) ||
       typeof request.selection !== "string" ||
       !request.selection ||
       request.selection.length > 1024 ||
+      (request.pluginId !== undefined &&
+        (typeof request.pluginId !== "string" || request.pluginId.length > 64 ||
+          !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(request.pluginId))) ||
+      (request.pluginConfig !== undefined && !object(request.pluginConfig)) ||
+      ((!request.pluginId || request.pluginId === "legacy-static") &&
+        Object.keys(request.pluginConfig ?? {}).length > 0) ||
+      (request.pluginId && request.pluginId !== "legacy-static" &&
+        ["connections", "pythonPath", "entrypoint"].some((key) => Object.hasOwn(request, key))) ||
       (request.pythonPath !== undefined &&
         (typeof request.pythonPath !== "string" ||
           request.pythonPath.length > 512)) ||
@@ -421,6 +442,12 @@ const bridgeErrors = new Set([
   "sensitive_content",
   "workspace_directory_limit",
   "workspace_entry_limit",
+  "plugin_not_registered",
+  "plugin_schema_invalid",
+  "plugin_analysis_failed",
+  "plugin_result_too_large",
+  "plugin_workspace_request_rejected",
+  "plugin_preview_only",
 ]);
 
 /** Shared fixed subprocess transport; never executes captured source. */
@@ -500,7 +527,13 @@ export async function analyzeWorkspace(
     throw new DiscoveryError("discovery_policy_too_large", 409);
   const result = await invokeBridge(payload, 60000);
   if (
-    result.format !== "datahub-etl.preview/3" ||
+    result.format !== (request.pluginId && request.pluginId !== "legacy-static"
+      ? "dataflow-discovery.plugin-preview/1" : "datahub-etl.preview/3") ||
+    (result.format === "dataflow-discovery.plugin-preview/1" &&
+      (result.result?.plugin?.id !== request.pluginId ||
+        result.result?.sourceId !== policy.sourceId ||
+        result.result?.snapshotSha256 !== result.snapshotSha256 ||
+        result.result?.publicationAuthorized !== false || result.result?.runtimeVerified !== false)) ||
     result.sourceId !== policy.sourceId ||
     !digest.test(result.snapshotSha256) ||
     result.publicationAuthorized !== false ||
@@ -508,6 +541,13 @@ export async function analyzeWorkspace(
   )
     throw new DiscoveryError("discovery_analysis_unavailable", 503);
   return result;
+}
+
+function workspaceResponse(result, request) {
+  const response = { ...result, requestId: request.requestId, observedAt: new Date().toISOString() };
+  if (Buffer.byteLength(JSON.stringify(response)) > 60000)
+    throw new DiscoveryError("discovery_workspace_too_large", 409);
+  return response;
 }
 
 /** Trusted preparation only: reproduce selected source and Catalog bindings.
@@ -1063,6 +1103,8 @@ export async function prepareWorkspacePublication(
  */
 export async function prepareWorkspaceImport(input, context) {
   const request = parseRequest(JSON.stringify(input));
+  if (request.pluginId !== undefined && request.pluginId !== "legacy-static")
+    throw new DiscoveryError("plugin_preview_only", 409);
   const policy = context.discoverySources.find(
     (item) => item.sourceId === request.sourceId,
   );
@@ -1458,6 +1500,9 @@ export async function nativeDiscovery(
     sources,
     assertActive,
     analyze = analyzeDiscovery,
+    pluginDevelopment,
+    pluginActivations,
+    signal,
     frontendOrigin,
     cookieHeader,
     fetchImpl = fetch,
@@ -1467,6 +1512,32 @@ export async function nativeDiscovery(
   assertActive();
   if (!actor?.key || !actor?.tenant || !actor?.urn || !Array.isArray(sources))
     throw new DiscoveryError("discovery_identity_required");
+  if (request.action.startsWith("plugin_development_")) {
+    if (!pluginDevelopment) throw new DiscoveryError("development_not_enabled", 403);
+    try {
+      const result = await pluginDevelopment.handle(request, { actor, sources, assertActive, signal, bridge: invokeBridge });
+      assertActive();
+      return workspaceResponse(result, request);
+    } catch (error) {
+      if (error instanceof DiscoveryError) throw error;
+      const code = typeof error?.code === "string" && /^[a-z_]{1,80}$/.test(error.code) ? error.code : "development_runtime_unavailable";
+      throw new DiscoveryError(code, [400, 403, 409, 503].includes(error?.status) ? error.status : 503);
+    }
+  }
+  if (request.action === "list_plugins") {
+    const result = await invokeBridge({ operation: "list_plugins" }, 60000);
+    if (result.format !== "dataflow-discovery.plugins/1" ||
+        !Array.isArray(result.plugins) || result.publicationAuthorized !== false)
+      throw new DiscoveryError("discovery_analysis_unavailable", 503);
+    if (pluginActivations) {
+      const activated = await pluginActivations.list({ actor, sources, assertActive, signal, bridge: invokeBridge });
+      if (activated.some(item => result.plugins.some(builtin => builtin.manifest.id === item.manifest.id)))
+        throw new DiscoveryError("activation_plugin_collision", 409);
+      result.plugins.push(...activated);
+    }
+    assertActive();
+    return workspaceResponse(result, request);
+  }
   if (request.action === "list_sources")
     return {
       requestId: request.requestId,
@@ -1496,6 +1567,15 @@ export async function nativeDiscovery(
     if (policy.workspace !== true)
       throw new DiscoveryError("discovery_source_not_authorized");
     const selection = workspaceSelection(policy.root, request.selection);
+    if (request.pluginId && request.pluginId !== "legacy-static") {
+      // Registered pure plugins need source evidence, not Python connections or
+      // Catalog credentials. No failure can fall back to the legacy analyzer.
+      const result = pluginActivations?.has(request.pluginId)
+        ? await pluginActivations.analyze(policy, { ...request, selection }, { actor, sources, assertActive, signal, bridge: invokeBridge })
+        : await analyzeWorkspace(policy, { ...request, selection });
+      assertActive();
+      return workspaceResponse(result, request);
+    }
     let catalog, relatedCatalog;
     if (request.connections !== undefined) {
       const scopes = {};
@@ -1570,14 +1650,7 @@ export async function nativeDiscovery(
       );
     }
     assertActive();
-    const response = {
-      ...result,
-      requestId: request.requestId,
-      observedAt: new Date().toISOString(),
-    };
-    if (Buffer.byteLength(JSON.stringify(response)) > 60000)
-      throw new DiscoveryError("discovery_workspace_too_large", 409);
-    return response;
+    return workspaceResponse(result, request);
   }
   if (policy.workspace === true)
     throw new DiscoveryError("discovery_source_not_authorized");

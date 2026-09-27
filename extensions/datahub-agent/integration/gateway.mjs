@@ -495,15 +495,15 @@ export async function createAgentGateway({
             : operations.has(request.url)
               ? ["grantId", "revokeToken", "request"]
               : ["grantId", "revokeToken"],
-          request.url === "/agent/sql"
-            ? 65536
-            : request.url === "/agent/semantic"
-              ? 49152 // JSON-escaped 24KB intent plus parent-only proof envelope.
-              : ["/agent/tasks", "/agent/discovery", "/agent/catalog"].includes(
-                    request.url,
-                  )
-                ? 16384
-                : 4096,
+          request.url === "/agent/discovery"
+            ? 131072 // Escaped source capsule + parent proof; legacy intents stay 8KB in Discovery.
+            : request.url === "/agent/sql"
+              ? 65536
+              : request.url === "/agent/semantic"
+                ? 49152 // JSON-escaped 24KB intent plus parent-only proof envelope.
+                : ["/agent/tasks", "/agent/catalog"].includes(request.url)
+                  ? 16384
+                  : 4096,
         );
         if (request.url === "/agent/bootstrap") {
           const actor = await verifyIdentity(request.headers.cookie);
@@ -527,19 +527,17 @@ export async function createAgentGateway({
           const { handler, name } = operations.get(request.url);
           if (!handler) throw new HttpError(403, `${name}_not_configured`);
           const actor = await verifyIdentity(request.headers.cookie);
-          const sql = [
-            "/agent/sql",
-            "/agent/sql-result",
-            "/agent/grafana",
+          const interruptible = [
+            "/agent/sql", "/agent/sql-result", "/agent/grafana", "/agent/discovery",
           ].includes(request.url);
           const interrupted = new AbortController();
           const disconnect = () => interrupted.abort();
-          if (sql) {
+          if (interruptible) {
             request.once("aborted", disconnect);
             response.once("close", disconnect);
           }
           const assertActive = () => {
-            if (response.destroyed || (sql && interrupted.signal.aborted))
+            if (response.destroyed || (interruptible && interrupted.signal.aborted))
               throw new HttpError(409, "ingestion_request_closed");
             grants.renew(input.grantId, actor, input.revokeToken);
           };
@@ -549,7 +547,7 @@ export async function createAgentGateway({
               actor,
               cookieHeader: request.headers.cookie,
               assertActive,
-              ...(sql ? { signal: interrupted.signal } : {}),
+              ...(interruptible ? { signal: interrupted.signal } : {}),
               ...(request.url === "/agent/grafana"
                 ? { grantId: input.grantId }
                 : {}),
@@ -562,7 +560,7 @@ export async function createAgentGateway({
             assertActive();
             json(response, 200, result);
           } finally {
-            if (sql) {
+            if (interruptible) {
               request.off("aborted", disconnect);
               response.off("close", disconnect);
             }

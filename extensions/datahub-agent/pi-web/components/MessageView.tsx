@@ -6,6 +6,8 @@ import { MarkdownBody } from "./MarkdownBody";
 import { ImagePreview } from "./ImagePreview";
 import { ThinkingIcon } from "./ThinkingIcon";
 import { DataHubEtlPreview, isEtlPreview } from "./DataHubEtlPreview";
+import { DataHubPluginPreview } from "./DataHubPluginPreview";
+import { isPluginPreview } from "@/lib/discovery-plugin-preview";
 import {
   DataHubSemanticPreview,
   isSemanticPreview,
@@ -1595,6 +1597,10 @@ function ToolCallBlock({
     isEtlPreview(result?.details)
       ? result.details
       : null;
+  const pluginPreview =
+    block.toolName === "datahub_etl" && !isError && isPluginPreview(result?.details)
+      ? result.details
+      : null;
   const semanticPreview =
     block.toolName === "datahub_semantic" &&
     !isError &&
@@ -1772,6 +1778,7 @@ function ToolCallBlock({
       </div>
 
       {etlPreview && <DataHubEtlPreview preview={etlPreview} />}
+      {pluginPreview && <DataHubPluginPreview preview={pluginPreview} />}
       {semanticPreview && <DataHubSemanticPreview preview={semanticPreview} />}
       {semanticReview && <DataHubSemanticReview review={semanticReview} />}
 
