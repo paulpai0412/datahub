@@ -39,6 +39,7 @@ export async function createRuntimeManager({
   memoryMiB = 1024,
   cpus = 1,
   maxRuntimes = 2,
+  pluginDevelopmentActors = [],
 }) {
   if (
     process.getuid?.() !== 1000 ||
@@ -52,10 +53,13 @@ export async function createRuntimeManager({
     cpus > 4 ||
     !Number.isInteger(maxRuntimes) ||
     maxRuntimes < 1 ||
-    maxRuntimes > 8
+    maxRuntimes > 8 ||
+    !Array.isArray(pluginDevelopmentActors) ||
+    pluginDevelopmentActors.some(key => typeof key !== "string" || !/^[a-f0-9]{48}$/.test(key))
   ) {
     throw new Error("invalid_runtime_configuration");
   }
+  const developers = new Set(pluginDevelopmentActors);
   const root = await mkdtemp("/tmp/dha-");
   const records = new Map();
   let closed = false;
@@ -181,6 +185,8 @@ export async function createRuntimeManager({
       "--env",
       "PI_WEB_SKIP_VERSION_CHECK=1",
       "--env",
+      `DATAHUB_DISCOVERY_PLUGIN_DEVELOPMENT=${record.pluginDevelopment ? "true" : "false"}`,
+      "--env",
       "NEXT_TELEMETRY_DISABLED=1",
       "--env",
       "NODE_USE_ENV_PROXY=1",
@@ -199,6 +205,8 @@ export async function createRuntimeManager({
       actual.HostConfig.Privileged ||
       !actual.HostConfig.ReadonlyRootfs ||
       actual.Config.User !== "1000:1000" ||
+      actual.Config.Env.filter(value => value.startsWith("DATAHUB_DISCOVERY_PLUGIN_DEVELOPMENT=")).length !== 1 ||
+      !actual.Config.Env.includes(`DATAHUB_DISCOVERY_PLUGIN_DEVELOPMENT=${record.pluginDevelopment ? "true" : "false"}`) ||
       !actual.HostConfig.CapDrop?.includes("ALL") ||
       !actual.HostConfig.SecurityOpt?.includes("no-new-privileges") ||
       actual.HostConfig.Memory !== memoryMiB * 1024 * 1024 ||
@@ -273,6 +281,7 @@ export async function createRuntimeManager({
         return Promise.reject(new Error("runtime_capacity_exhausted"));
       const record = {
         owner,
+        pluginDevelopment: developers.has(actor.key),
         name: `dha-${scope}-${randomUUID()}`,
         volume: `dha-${scope}-${actor.key}`,
         directory: join(root, actor.key),

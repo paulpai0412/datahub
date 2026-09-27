@@ -110,6 +110,7 @@ function workspacePolicy(source) {
       "workspace",
       "modelContextApproved",
       "catalogScopes",
+      "adoption",
     ]) ||
     typeof source.sourceId !== "string" ||
     !sourceId.test(source.sourceId) ||
@@ -126,9 +127,98 @@ function workspacePolicy(source) {
     Buffer.byteLength(JSON.stringify(source)) > 65536
   )
     throw new DiscoveryError("invalid_discovery_policy");
+  const scopes = catalogScopes(source.catalogScopes, sourceId);
+  let adoption;
+  if (source.adoption !== undefined) {
+    const value = source.adoption;
+    const names = object(value?.jobs) ? Object.entries(value.jobs) : [];
+    const evidenceOnly = value?.evidenceOnly;
+    const relatedCatalogUrns = value?.relatedCatalogUrns;
+    const flow = value?.flowUrn;
+    const targets = [
+      [flow, ["dataFlowKey", "dataFlowInfo"]],
+      ...names.map(([, urn]) => [
+        urn,
+        ["dataJobKey", "dataJobInfo", "dataJobInputOutput"],
+      ]),
+    ];
+    const versions = value?.nativeVersions;
+    const envs = new Set(Object.values(scopes).map((scope) => scope.env));
+    if (
+      !only(value, [
+        "snapshotSha256",
+        "flowUrn",
+        "jobs",
+        "evidenceOnly",
+        "nativeVersions",
+        "relatedCatalogUrns",
+      ]) ||
+      !digest.test(value.snapshotSha256 ?? "") ||
+      typeof flow !== "string" ||
+      !/^urn:li:dataFlow:\(python,[^,()]+,[A-Z]+\)$/.test(flow) ||
+      envs.size !== 1 ||
+      !flow.endsWith(`,${[...envs][0]})`) ||
+      !names.length ||
+      names.length > 16 ||
+      names.some(
+        ([name, urn]) =>
+          !/^[A-Za-z_][A-Za-z_0-9]*$/.test(name) ||
+          typeof urn !== "string" ||
+          !urn.startsWith(`urn:li:dataJob:(${flow},`) ||
+          !/^[-.A-Za-z_0-9]+\)$/.test(
+            urn.slice(`urn:li:dataJob:(${flow},`.length),
+          ),
+      ) ||
+      new Set(names.map(([, urn]) => urn)).size !== names.length ||
+      !object(versions) ||
+      Object.keys(versions).length !== targets.length ||
+      targets.some(
+        ([urn, fields]) =>
+          !only(versions[urn], fields) ||
+          Object.keys(versions[urn]).length !== fields.length ||
+          fields.some(
+            (field) =>
+              typeof versions[urn][field] !== "string" ||
+              !/^[1-9][0-9]*$/.test(versions[urn][field]),
+          ),
+      ) ||
+      !Array.isArray(relatedCatalogUrns) ||
+      relatedCatalogUrns.length > 32 ||
+      new Set(relatedCatalogUrns).size !== relatedCatalogUrns.length ||
+      relatedCatalogUrns.some(
+        (urn) =>
+          typeof urn !== "string" ||
+          urn.length > 1024 ||
+          !urn.startsWith("urn:li:dataset:(urn:li:dataPlatform:grafana,"),
+      ) ||
+      !Array.isArray(evidenceOnly) ||
+      evidenceOnly.length > 8 ||
+      new Set(evidenceOnly).size !== evidenceOnly.length ||
+      evidenceOnly.some(
+        (name) =>
+          typeof name !== "string" ||
+          !/^[A-Za-z_][A-Za-z_0-9]*$/.test(name) ||
+          Object.hasOwn(value.jobs, name),
+      )
+    )
+      throw new DiscoveryError("invalid_discovery_policy");
+    adoption = Object.freeze({
+      snapshotSha256: value.snapshotSha256,
+      flowUrn: flow,
+      jobs: Object.freeze(Object.fromEntries(names)),
+      nativeVersions: Object.freeze(
+        Object.fromEntries(
+          targets.map(([urn]) => [urn, Object.freeze({ ...versions[urn] })]),
+        ),
+      ),
+      evidenceOnly: Object.freeze([...evidenceOnly]),
+      relatedCatalogUrns: Object.freeze([...relatedCatalogUrns]),
+    });
+  }
   return Object.freeze({
     ...source,
-    catalogScopes: catalogScopes(source.catalogScopes, sourceId),
+    catalogScopes: scopes,
+    ...(adoption === undefined ? {} : { adoption }),
   });
 }
 
@@ -207,12 +297,20 @@ export function discoveryPolicies(value = {}) {
 function parseRequest(text) {
   let request;
   try {
-    if (typeof text !== "string" || Buffer.byteLength(text) > 8192)
+    if (typeof text !== "string" || Buffer.byteLength(text) > 60000)
       throw new Error();
     request = JSON.parse(text);
   } catch {
     throw new DiscoveryError("invalid_discovery_request", 400);
   }
+  if (["plugin_development_contract", "plugin_development_references", "plugin_development_reference", "plugin_development_verify"].includes(request?.action)) {
+    if (!object(request) || typeof request.requestId !== "string" || !requestId.test(request.requestId))
+      throw new DiscoveryError("invalid_discovery_request", 400);
+    // The opt-in service validates the complete closed capsule schema before
+    // any capture/execution. Ordinary Discovery retains its original 8KB cap.
+    return request;
+  }
+  if (Buffer.byteLength(text) > 8192) throw new DiscoveryError("invalid_discovery_request", 400);
   if (
     !only(request, [
       "requestId",
@@ -226,6 +324,8 @@ function parseRequest(text) {
       "entrypoint",
       "snapshotSha256",
       "connections",
+      "pluginId",
+      "pluginConfig",
     ]) ||
     typeof request.requestId !== "string" ||
     !requestId.test(request.requestId) ||
@@ -233,11 +333,12 @@ function parseRequest(text) {
       "list_sources",
       "analyze",
       "list_workspaces",
+      "list_plugins",
       "analyze_workspace",
     ].includes(request.action)
   )
     throw new DiscoveryError("invalid_discovery_request", 400);
-  if (["list_sources", "list_workspaces"].includes(request.action)) {
+  if (["list_sources", "list_workspaces", "list_plugins"].includes(request.action)) {
     if (
       Object.keys(request).some((key) => !["requestId", "action"].includes(key))
     )
@@ -253,12 +354,22 @@ function parseRequest(text) {
         "entrypoint",
         "snapshotSha256",
         "connections",
+        "pluginId",
+        "pluginConfig",
       ]) ||
       typeof request.sourceId !== "string" ||
       !sourceId.test(request.sourceId) ||
       typeof request.selection !== "string" ||
       !request.selection ||
       request.selection.length > 1024 ||
+      (request.pluginId !== undefined &&
+        (typeof request.pluginId !== "string" || request.pluginId.length > 64 ||
+          !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(request.pluginId))) ||
+      (request.pluginConfig !== undefined && !object(request.pluginConfig)) ||
+      ((!request.pluginId || request.pluginId === "legacy-static") &&
+        Object.keys(request.pluginConfig ?? {}).length > 0) ||
+      (request.pluginId && request.pluginId !== "legacy-static" &&
+        ["connections", "pythonPath", "entrypoint"].some((key) => Object.hasOwn(request, key))) ||
       (request.pythonPath !== undefined &&
         (typeof request.pythonPath !== "string" ||
           request.pythonPath.length > 512)) ||
@@ -331,17 +442,32 @@ const bridgeErrors = new Set([
   "sensitive_content",
   "workspace_directory_limit",
   "workspace_entry_limit",
+  "plugin_not_registered",
+  "plugin_schema_invalid",
+  "plugin_analysis_failed",
+  "plugin_result_too_large",
+  "plugin_workspace_request_rejected",
+  "plugin_preview_only",
 ]);
 
 /** Shared fixed subprocess transport; never executes captured source. */
 async function invokeBridge(payload, maxBuffer) {
-  const { failed, stdout } = await invokePythonBridge("discovery", payload, maxBuffer);
+  const { failed, stdout } = await invokePythonBridge(
+    "discovery",
+    payload,
+    maxBuffer,
+  );
   let result;
-  try { result = JSON.parse(stdout); } catch { /* Never return stderr. */ }
+  try {
+    result = JSON.parse(stdout);
+  } catch {
+    /* Never return stderr. */
+  }
   if (object(result) && bridgeErrors.has(result.error)) {
     throw new DiscoveryError(result.error, 409);
   }
-  if (failed || !object(result)) throw new DiscoveryError("discovery_analysis_unavailable", 503);
+  if (failed || !object(result))
+    throw new DiscoveryError("discovery_analysis_unavailable", 503);
   return result;
 }
 
@@ -401,7 +527,13 @@ export async function analyzeWorkspace(
     throw new DiscoveryError("discovery_policy_too_large", 409);
   const result = await invokeBridge(payload, 60000);
   if (
-    result.format !== "datahub-etl.preview/3" ||
+    result.format !== (request.pluginId && request.pluginId !== "legacy-static"
+      ? "dataflow-discovery.plugin-preview/1" : "datahub-etl.preview/3") ||
+    (result.format === "dataflow-discovery.plugin-preview/1" &&
+      (result.result?.plugin?.id !== request.pluginId ||
+        result.result?.sourceId !== policy.sourceId ||
+        result.result?.snapshotSha256 !== result.snapshotSha256 ||
+        result.result?.publicationAuthorized !== false || result.result?.runtimeVerified !== false)) ||
     result.sourceId !== policy.sourceId ||
     !digest.test(result.snapshotSha256) ||
     result.publicationAuthorized !== false ||
@@ -409,6 +541,13 @@ export async function analyzeWorkspace(
   )
     throw new DiscoveryError("discovery_analysis_unavailable", 503);
   return result;
+}
+
+function workspaceResponse(result, request) {
+  const response = { ...result, requestId: request.requestId, observedAt: new Date().toISOString() };
+  if (Buffer.byteLength(JSON.stringify(response)) > 60000)
+    throw new DiscoveryError("discovery_workspace_too_large", 409);
+  return response;
 }
 
 /** Trusted preparation only: reproduce selected source and Catalog bindings.
@@ -447,10 +586,27 @@ export async function compileWorkspacePublication(
 /** Resolve captured Grafana datasource/panel identities through native metadata.
  * Search is bounded and complete or rejected; no guessed connector URNs.
  */
-export async function readWorkspaceBiCatalog(requests, context) {
+export async function readWorkspaceBiCatalog(requests, context, fixedUrns) {
   if (!Array.isArray(requests) || requests.length > 128)
     throw new DiscoveryError("workspace_bi_catalog_rejected", 409);
-  if (!requests.length) return [];
+  if (
+    fixedUrns !== undefined &&
+    (!Array.isArray(fixedUrns) ||
+      fixedUrns.length > 32 ||
+      new Set(fixedUrns).size !== fixedUrns.length ||
+      fixedUrns.some(
+        (urn) =>
+          typeof urn !== "string" ||
+          urn.length > 1024 ||
+          !urn.startsWith("urn:li:dataset:(urn:li:dataPlatform:grafana,"),
+      ))
+  )
+    throw new DiscoveryError("workspace_bi_catalog_rejected", 409);
+  if (!requests.length) {
+    if (fixedUrns?.length)
+      throw new DiscoveryError("workspace_bi_catalog_incomplete", 409);
+    return [];
+  }
   const cookie = datahubSessionCookie(context.cookieHeader);
   async function call(path, body) {
     context.assertActive();
@@ -476,44 +632,52 @@ export async function readWorkspaceBiCatalog(requests, context) {
         throw new DiscoveryError("workspace_bi_catalog_rejected");
       chunks.push(chunk);
     }
-    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    let value;
+    try {
+      value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      throw new DiscoveryError("workspace_bi_catalog_rejected");
+    }
     if (value.errors?.length)
       throw new DiscoveryError("workspace_bi_catalog_rejected");
     context.assertActive();
     return value;
   }
-  const found = await call("/api/v2/graphql", {
-    query:
-      "query($input:SearchAcrossEntitiesInput!){searchAcrossEntities(input:$input){total searchResults{entity{urn}}}}",
-    variables: {
-      input: {
-        types: ["DATASET"],
-        query: "*",
-        start: 0,
-        count: 100,
-        orFilters: [
-          {
-            and: [
-              {
-                field: "platform",
-                values: ["urn:li:dataPlatform:grafana"],
-                condition: "EQUAL",
-              },
-            ],
-          },
-        ],
+  let urns = fixedUrns;
+  if (urns === undefined) {
+    const found = await call("/api/v2/graphql", {
+      query:
+        "query($input:SearchAcrossEntitiesInput!){searchAcrossEntities(input:$input){total searchResults{entity{urn}}}}",
+      variables: {
+        input: {
+          types: ["DATASET"],
+          query: "*",
+          start: 0,
+          count: 100,
+          orFilters: [
+            {
+              and: [
+                {
+                  field: "platform",
+                  values: ["urn:li:dataPlatform:grafana"],
+                  condition: "EQUAL",
+                },
+              ],
+            },
+          ],
+        },
       },
-    },
-  });
-  const result = found.data?.searchAcrossEntities;
-  if (
-    !Number.isSafeInteger(result?.total) ||
-    result.total > 100 ||
-    !Array.isArray(result.searchResults) ||
-    result.searchResults.length !== result.total
-  )
-    throw new DiscoveryError("workspace_bi_catalog_incomplete", 409);
-  const urns = result.searchResults.map((item) => item.entity?.urn);
+    });
+    const result = found.data?.searchAcrossEntities;
+    if (
+      !Number.isSafeInteger(result?.total) ||
+      result.total > 100 ||
+      !Array.isArray(result.searchResults) ||
+      result.searchResults.length !== result.total
+    )
+      throw new DiscoveryError("workspace_bi_catalog_incomplete", 409);
+    urns = result.searchResults.map((item) => item.entity?.urn);
+  }
   if (
     !urns.length ||
     new Set(urns).size !== urns.length ||
@@ -575,6 +739,8 @@ export async function readWorkspaceBiCatalog(requests, context) {
       )
     );
   });
+  if (fixedUrns !== undefined && selected.length !== urns.length)
+    throw new DiscoveryError("workspace_bi_catalog_incomplete", 409);
   for (const item of requests.filter((item) => item.kind === "panel")) {
     if (
       selected.filter((row) => {
@@ -689,6 +855,61 @@ export function mergeWorkspaceAspect(aspect, desired, current) {
   return merged;
 }
 
+/** An operator-selected existing Flow is a required native target, never a
+ * fallback create. Re-run against fresh native values at preparation and at
+ * admission; unchanged Job I/O still participates in the recompiled diff.
+ */
+export function assertWorkspaceAdoption(policy, compiled, observed) {
+  if (!policy.adoption) return;
+  const flow = policy.adoption.flowUrn;
+  const jobs = new Set(Object.values(policy.adoption.jobs));
+  if (
+    compiled.snapshotSha256 !== policy.adoption.snapshotSha256 ||
+    compiled.flowUrn !== flow ||
+    Object.keys(compiled.jobUrns).length !== jobs.size ||
+    new Set(Object.values(compiled.jobUrns)).size !== jobs.size ||
+    Object.values(compiled.jobUrns).some((urn) => !jobs.has(urn)) ||
+    compiled.aspects.some(
+      (item) =>
+        (item.urn.startsWith("urn:li:dataFlow:") && item.urn !== flow) ||
+        (item.urn.startsWith("urn:li:dataJob:") && !jobs.has(item.urn)),
+    )
+  )
+    throw new DiscoveryError("workspace_adoption_conflict", 409);
+  if (observed === undefined) return;
+  if (!(observed instanceof Map))
+    throw new DiscoveryError("workspace_adoption_conflict", 409);
+  for (const [urn, names] of [
+    [flow, ["dataFlowKey", "dataFlowInfo"]],
+    ...Array.from(jobs, (urn) => [
+      urn,
+      ["dataJobKey", "dataJobInfo", "dataJobInputOutput"],
+    ]),
+  ]) {
+    const row = observed.get(urn);
+    const properties =
+      row?.[urn === flow ? "dataFlowInfo" : "dataJobInfo"]?.value
+        ?.customProperties;
+    const markers = ["datahub_etl.sourceId", "discovery.sourceId"];
+    if (
+      !row ||
+      names.some(
+        (name) =>
+          !object(row[name]?.value) ||
+          row[name]?.systemMetadata?.version !==
+            policy.adoption.nativeVersions[urn][name],
+      ) ||
+      !object(properties) ||
+      !markers.some((marker) => properties[marker] === policy.sourceId) ||
+      markers.some(
+        (marker) =>
+          properties[marker] && properties[marker] !== policy.sourceId,
+      )
+    )
+      throw new DiscoveryError("workspace_adoption_conflict", 409);
+  }
+}
+
 /** Host-only source compilation + native reads. No metadata writes or consent.
  * The existing Task publisher must still validate provenance, ACL and CAS.
  */
@@ -698,6 +919,8 @@ export async function prepareWorkspacePublication(
   source,
   context,
 ) {
+  if (!policy.adoption)
+    throw new DiscoveryError("workspace_identity_policy_required", 409);
   const scopes = Object.fromEntries(
     Object.entries(request.connections).map(([id, scope]) => [
       id,
@@ -714,6 +937,7 @@ export async function prepareWorkspacePublication(
   const relatedCatalog = await readWorkspaceBiCatalog(
     descriptor.relatedCatalogRequests,
     context,
+    policy.adoption.relatedCatalogUrns,
   );
   const compiled = await compileWorkspacePublication(
     policy,
@@ -721,6 +945,7 @@ export async function prepareWorkspacePublication(
     catalog,
     relatedCatalog,
   );
+  assertWorkspaceAdoption(policy, compiled);
   const cookie = datahubSessionCookie(context.cookieHeader);
   async function call(path, body) {
     context.assertActive();
@@ -746,7 +971,12 @@ export async function prepareWorkspacePublication(
         throw new DiscoveryError("discovery_catalog_rejected");
       chunks.push(chunk);
     }
-    const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    let value;
+    try {
+      value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    } catch {
+      throw new DiscoveryError("discovery_catalog_rejected");
+    }
     if (value.errors?.length)
       throw new DiscoveryError("discovery_catalog_rejected");
     context.assertActive();
@@ -761,6 +991,9 @@ export async function prepareWorkspacePublication(
     group.set(item.urn, {
       ...(group.get(item.urn) ?? { urn: item.urn }),
       [item.aspect]: {},
+      ...(policy.adoption && kind !== "dataset"
+        ? { [kind === "dataFlow" ? "dataFlowKey" : "dataJobKey"]: {} }
+        : {}),
     });
   }
   const observed = new Map();
@@ -787,18 +1020,16 @@ export async function prepareWorkspacePublication(
       if (
         !Array.isArray(grants) ||
         !grants.some((p) =>
-          [
-            "GET_ENTITY",
-            "VIEW_ENTITY_PAGE",
-            "EDIT_ENTITY",
-            "CREATE_ENTITY",
-          ].includes(p),
+          (policy.adoption && kind !== "dataset"
+            ? ["GET_ENTITY", "VIEW_ENTITY_PAGE", "EDIT_ENTITY"]
+            : ["GET_ENTITY", "VIEW_ENTITY_PAGE", "EDIT_ENTITY", "CREATE_ENTITY"]
+          ).includes(p),
         )
       )
         throw new DiscoveryError("discovery_catalog_rejected");
     }
     const rows = await call(
-      `/openapi/v3/entity/${kind.toLowerCase()}/batchGet?systemMetadata=true`,
+      `/openapi/v3/entity/${kind}/batchGet?systemMetadata=true`,
       [...group.values()],
     );
     if (
@@ -809,6 +1040,7 @@ export async function prepareWorkspacePublication(
       throw new DiscoveryError("discovery_catalog_rejected");
     for (const row of rows) observed.set(row.urn, row);
   }
+  assertWorkspaceAdoption(policy, compiled, observed);
   const changes = [],
     unchanged = [];
   for (const item of compiled.aspects) {
@@ -871,6 +1103,8 @@ export async function prepareWorkspacePublication(
  */
 export async function prepareWorkspaceImport(input, context) {
   const request = parseRequest(JSON.stringify(input));
+  if (request.pluginId !== undefined && request.pluginId !== "legacy-static")
+    throw new DiscoveryError("plugin_preview_only", 409);
   const policy = context.discoverySources.find(
     (item) => item.sourceId === request.sourceId,
   );
@@ -1156,14 +1390,13 @@ export async function readDiscoveryCatalog(
   { actor, frontendOrigin, cookieHeader, assertActive, fetchImpl = fetch },
 ) {
   const cookie = datahubSessionCookie(cookieHeader);
-  const signal = AbortSignal.timeout(10000);
   async function call(path, body) {
     assertActive();
     try {
       const response = await fetchImpl(new URL(path, frontendOrigin), {
         method: "POST",
         redirect: "manual",
-        signal,
+        signal: AbortSignal.timeout(10000),
         headers: { "content-type": "application/json", cookie },
         body: JSON.stringify(body),
       });
@@ -1267,6 +1500,9 @@ export async function nativeDiscovery(
     sources,
     assertActive,
     analyze = analyzeDiscovery,
+    pluginDevelopment,
+    pluginActivations,
+    signal,
     frontendOrigin,
     cookieHeader,
     fetchImpl = fetch,
@@ -1276,6 +1512,32 @@ export async function nativeDiscovery(
   assertActive();
   if (!actor?.key || !actor?.tenant || !actor?.urn || !Array.isArray(sources))
     throw new DiscoveryError("discovery_identity_required");
+  if (request.action.startsWith("plugin_development_")) {
+    if (!pluginDevelopment) throw new DiscoveryError("development_not_enabled", 403);
+    try {
+      const result = await pluginDevelopment.handle(request, { actor, sources, assertActive, signal, bridge: invokeBridge });
+      assertActive();
+      return workspaceResponse(result, request);
+    } catch (error) {
+      if (error instanceof DiscoveryError) throw error;
+      const code = typeof error?.code === "string" && /^[a-z_]{1,80}$/.test(error.code) ? error.code : "development_runtime_unavailable";
+      throw new DiscoveryError(code, [400, 403, 409, 503].includes(error?.status) ? error.status : 503);
+    }
+  }
+  if (request.action === "list_plugins") {
+    const result = await invokeBridge({ operation: "list_plugins" }, 60000);
+    if (result.format !== "dataflow-discovery.plugins/1" ||
+        !Array.isArray(result.plugins) || result.publicationAuthorized !== false)
+      throw new DiscoveryError("discovery_analysis_unavailable", 503);
+    if (pluginActivations) {
+      const activated = await pluginActivations.list({ actor, sources, assertActive, signal, bridge: invokeBridge });
+      if (activated.some(item => result.plugins.some(builtin => builtin.manifest.id === item.manifest.id)))
+        throw new DiscoveryError("activation_plugin_collision", 409);
+      result.plugins.push(...activated);
+    }
+    assertActive();
+    return workspaceResponse(result, request);
+  }
   if (request.action === "list_sources")
     return {
       requestId: request.requestId,
@@ -1305,6 +1567,15 @@ export async function nativeDiscovery(
     if (policy.workspace !== true)
       throw new DiscoveryError("discovery_source_not_authorized");
     const selection = workspaceSelection(policy.root, request.selection);
+    if (request.pluginId && request.pluginId !== "legacy-static") {
+      // Registered pure plugins need source evidence, not Python connections or
+      // Catalog credentials. No failure can fall back to the legacy analyzer.
+      const result = pluginActivations?.has(request.pluginId)
+        ? await pluginActivations.analyze(policy, { ...request, selection }, { actor, sources, assertActive, signal, bridge: invokeBridge })
+        : await analyzeWorkspace(policy, { ...request, selection });
+      assertActive();
+      return workspaceResponse(result, request);
+    }
     let catalog, relatedCatalog;
     if (request.connections !== undefined) {
       const scopes = {};
@@ -1325,6 +1596,7 @@ export async function nativeDiscovery(
       relatedCatalog = await readWorkspaceBiCatalog(
         descriptor.relatedCatalogRequests,
         { actor, frontendOrigin, cookieHeader, assertActive, fetchImpl },
+        policy.adoption?.relatedCatalogUrns,
       );
     }
     const result = await analyzeWorkspace(
@@ -1378,14 +1650,7 @@ export async function nativeDiscovery(
       );
     }
     assertActive();
-    const response = {
-      ...result,
-      requestId: request.requestId,
-      observedAt: new Date().toISOString(),
-    };
-    if (Buffer.byteLength(JSON.stringify(response)) > 60000)
-      throw new DiscoveryError("discovery_workspace_too_large", 409);
-    return response;
+    return workspaceResponse(result, request);
   }
   if (policy.workspace === true)
     throw new DiscoveryError("discovery_source_not_authorized");

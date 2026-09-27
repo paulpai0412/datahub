@@ -16,7 +16,10 @@ export default function datahubEtl(pi: ExtensionAPI) {
     label: "datahub_etl",
     description:
       "Analyze an authorized WSL ETL directory/program and show a structured metadata preview in this chat. " +
-      "First list_workspaces; then analyze_workspace with its sourceId and the user's path as selection. " +
+      "First list_workspaces and list_plugins; then analyze_workspace with its sourceId and the user's path as selection. " +
+      "Select a registered pluginId and pluginConfig matching its returned configSchema. " +
+      "Omitting pluginId (or choosing legacy-static) preserves the full Python/Catalog field and Job preview. " +
+      "Other plugins return a declaration-only asset/operation/port preview; no Python connection choices or import. " +
       "Host discovers files and entrypoints. Ask only for ambiguous entrypoint/connection choices. " +
       "Use returned connection IDs and scopeChoices, never per-statement mappings or user-written URNs. " +
       "Connection selections require the returned snapshotSha256. Response is bounded to 60 KB; overflow is an error, not a truncated success. " +
@@ -28,6 +31,7 @@ export default function datahubEtl(pi: ExtensionAPI) {
       {
         action: StringEnum([
           "list_workspaces",
+          "list_plugins",
           "analyze_workspace",
           "import_workspace",
           "read_import",
@@ -36,6 +40,8 @@ export default function datahubEtl(pi: ExtensionAPI) {
         decisionId: Type.Optional(Type.String({ format: "uuid" })),
         sourceId: Type.Optional(Type.String({ maxLength: 128 })),
         selection: Type.Optional(Type.String({ maxLength: 1024 })),
+        pluginId: Type.Optional(Type.String({ pattern: "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$", maxLength: 64 })),
+        pluginConfig: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
         pythonPath: Type.Optional(Type.String({ maxLength: 512 })),
         entrypoint: Type.Optional(
           Type.String({ pattern: "^[A-Za-z_]\\w{0,127}$" }),
@@ -67,6 +73,10 @@ export default function datahubEtl(pi: ExtensionAPI) {
         throw new Error(
           "Connection choices require the analyzed snapshotSha256",
         );
+      const pluginPreview = params.pluginId !== undefined && params.pluginId !== "legacy-static";
+      if (pluginPreview && (params.action !== "analyze_workspace" ||
+          params.connections !== undefined || params.pythonPath !== undefined || params.entrypoint !== undefined))
+        throw new Error("Registered asset/language/semantic plugins are source-only previews; do not import or supply Python connection choices");
       const importing = params.action === "import_workspace";
       const reading = params.action === "read_import";
       if (importing && (!params.snapshotSha256 || !params.connections))
@@ -126,7 +136,8 @@ export default function datahubEtl(pi: ExtensionAPI) {
         value.requestId !== requestId ||
         value.publicationAuthorized !== false ||
         (params.action === "analyze_workspace" &&
-          value.format !== "datahub-etl.preview/3") ||
+          value.format !== (pluginPreview ? "dataflow-discovery.plugin-preview/1" : "datahub-etl.preview/3")) ||
+        (params.action === "list_plugins" && value.format !== "dataflow-discovery.plugins/1") ||
         ((importing || reading) && value.format !== "datahub-etl.import/1")
       )
         throw new Error("invalid_etl_host_response");

@@ -41,6 +41,15 @@ test("server entrypoint rejects browser identity, unsafe origins and missing sta
   }
 });
 
+test("read-only Core configuration rejects write/credential policies before Docker", async () => {
+  for (const readOnlyCore of [null, "true", 1, {}]) {
+    await assert.rejects(startAgentServer({ ...config, readOnlyCore }), /invalid_read_only_core_configuration/);
+  }
+  for (const name of ["ingestionSourcesByActor", "fixedEtlGrantsByActor", "sqlSourceOnlyGrantsByActor", "sqlPasswordPath", "grafanaDisplaysByActor"]) {
+    await assert.rejects(startAgentServer({ ...config, readOnlyCore: true, [name]: {} }), /read_only_core_configuration_conflict/);
+  }
+});
+
 test("operator egress policy rejects unsafe destinations before Docker", async () => {
   for (const origins of [
     null,
@@ -83,6 +92,12 @@ test("Discovery cannot enable a model-selected path or unapproved snapshot befor
       startAgentServer({ ...config, discoverySourcesByActor: policies }),
       /invalid_discovery_policy/,
     );
+  }
+});
+
+test("plugin development requires an operator actor and approved reference before Docker", async () => {
+  for (const policy of [null, [], { alice: {} }, { ["a".repeat(48)]: { referenceSourceId: "not-approved", image: `sha256:${"0".repeat(64)}`, evidenceRoot: "/not-used" } }]) {
+    await assert.rejects(startAgentServer({ ...config, pluginDevelopmentByActor: policy }), /invalid_plugin_development_configuration/);
   }
 });
 

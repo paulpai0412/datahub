@@ -8,6 +8,11 @@ import { createRuntimeManager } from "./runtime-manager.mjs";
 import { validateEgressOrigins } from "./egress-proxy.mjs";
 import { ingestionPolicies } from "./ingestion-policy.mjs";
 import { nativeIngestion } from "./native-ingestion.mjs";
+import {
+  nativeCatalog,
+  CatalogError,
+  catalogPolicies,
+} from "./native-catalog.mjs";
 import { SemanticError } from "./native-semantic.mjs";
 import { semanticHost } from "./native-semantic-tasks.mjs";
 import { nativeTasks } from "./native-tasks.mjs";
@@ -20,9 +25,17 @@ import {
   DiscoveryError,
 } from "./native-discovery.mjs";
 import { taskRuntime } from "./task-runtime.mjs";
+import { createSqlHost, sqlPolicies } from "./native-sql.mjs";
+import { createGrafanaHost, grafanaPolicies } from "./native-grafana.mjs";
+import { sqlAssetAuthorizer } from "./native-sql-assets.mjs";
+import {
+  createSalesSourceExecutor,
+  protectedSalesPassword,
+} from "./sales-sql-runner.mjs";
 
 const fields = new Set([
   "scope",
+  "readOnlyCore",
   "runtimeImageId",
   "gatewayOrigin",
   "datahubOrigin",
@@ -34,7 +47,13 @@ const fields = new Set([
   "egressOriginsByActor",
   "ingestionSourcesByActor",
   "discoverySourcesByActor",
+  "pluginDevelopmentByActor",
+  "pluginActivationsByActor",
   "fixedEtlGrantsByActor",
+  "catalogReadByActor",
+  "sqlSourceOnlyGrantsByActor",
+  "sqlPasswordPath",
+  "grafanaDisplaysByActor",
 ]);
 
 /** Local-only entrypoint. Config is operator-owned, never supplied by a browser.
@@ -50,6 +69,14 @@ export async function startAgentServer(config) {
   ) {
     throw new Error("invalid_agent_server_configuration");
   }
+  if (config.readOnlyCore !== undefined && typeof config.readOnlyCore !== "boolean")
+    throw new Error("invalid_read_only_core_configuration");
+  if (config.readOnlyCore && [
+    "ingestionSourcesByActor", "fixedEtlGrantsByActor", "sqlSourceOnlyGrantsByActor",
+    "sqlPasswordPath", "grafanaDisplaysByActor", "grafanaServiceKeyPath",
+    "queryConnections", "queryGrafana",
+  ].some(name => config[name] !== undefined))
+    throw new Error("read_only_core_configuration_conflict");
   const policies =
     config.egressOriginsByActor === undefined
       ? {}
@@ -63,17 +90,64 @@ export async function startAgentServer(config) {
     validateEgressOrigins(origins);
     actorOrigins.set(key, [...origins]);
   }
+  const catalogScopes = catalogPolicies(config.catalogReadByActor);
   const sourcePolicies = ingestionPolicies(config.ingestionSourcesByActor);
   const executionPolicies = fixedEtlPolicies(
     config.fixedEtlGrantsByActor,
     sourcePolicies,
   );
   const discoveryScopes = discoveryPolicies(config.discoverySourcesByActor);
+  const pluginScopes = new Map();
+  const development = config.pluginDevelopmentByActor === undefined ? {} : config.pluginDevelopmentByActor;
+  if (!development || typeof development !== "object" || Array.isArray(development)) throw new Error("invalid_plugin_development_configuration");
+  if (Object.keys(development).length) {
+    const { createPluginDevelopment } = await import("./plugin-development.mjs");
+    for (const [key, policy] of Object.entries(development)) {
+      if (!/^[a-f0-9]{48}$/.test(key) || !policy || typeof policy !== "object" || Array.isArray(policy) ||
+          Object.keys(policy).some(name => !["referenceSourceId", "image", "evidenceRoot"].includes(name)) ||
+          !(discoveryScopes.get(key) ?? []).some(source => source.sourceId === policy.referenceSourceId && source.workspace && source.modelContextApproved)) {
+        throw new Error("invalid_plugin_development_configuration");
+      }
+      pluginScopes.set(key, createPluginDevelopment({ ...policy, actors: [{ tenant: config.tenant, key }] }));
+    }
+  }
+  const activationScopes = new Map();
+  if (config.pluginActivationsByActor !== undefined) {
+    const { pluginActivationPolicies, createPluginActivations } = await import("./plugin-activation.mjs");
+    for (const [key, entries] of pluginActivationPolicies(config.pluginActivationsByActor, development, discoveryScopes)) {
+      const policy = development[key];
+      activationScopes.set(key, createPluginActivations({ actor: { tenant: config.tenant, key }, entries,
+        development: pluginScopes.get(key), evidenceRoot: policy.evidenceRoot, image: policy.image }));
+    }
+  }
+  const sqlScopes = sqlPolicies(config.sqlSourceOnlyGrantsByActor, {
+    sourceOnly: true,
+  });
+  if (sqlScopes.size > 0 !== (config.sqlPasswordPath !== undefined))
+    throw new Error("invalid_agent_server_configuration");
+  const sqlHost =
+    sqlScopes.size > 0
+      ? createSqlHost({
+          policies: sqlScopes,
+          sourceOnly: true,
+          authorizeAssets: sqlAssetAuthorizer({
+            frontendOrigin: config.datahubOrigin,
+          }),
+          executeSource: createSalesSourceExecutor({
+            getPassword: protectedSalesPassword(config.sqlPasswordPath),
+          }),
+        })
+      : null;
   const analysisActive = new Set();
   async function analyzeBounded(actor, exhausted, operation) {
-    if (analysisActive.has(actor.key) || analysisActive.size >= 2) throw exhausted;
+    if (analysisActive.has(actor.key) || analysisActive.size >= 2)
+      throw exhausted;
     analysisActive.add(actor.key);
-    try { return await operation(); } finally { analysisActive.delete(actor.key); }
+    try {
+      return await operation();
+    } finally {
+      analysisActive.delete(actor.key);
+    }
   }
   let gatewayOrigin;
   try {
@@ -111,6 +185,29 @@ export async function startAgentServer(config) {
     frontendOrigin: config.datahubOrigin,
     tenant: config.tenant,
   });
+  const grafanaScopes = grafanaPolicies(config.grafanaDisplaysByActor, {
+    datahubOrigin: config.datahubOrigin,
+  });
+  for (const [actorKey, display] of grafanaScopes) {
+    const source = sqlScopes.get(actorKey);
+    if (
+      !sqlHost ||
+      !source ||
+      source.datasetUrn !== display.datasetUrn ||
+      source.expiresAt < display.expiresAt ||
+      source.maxExecutions !== 1 ||
+      !catalogScopes.has(actorKey)
+    )
+      throw new Error("invalid_grafana_policy");
+  }
+  const grafanaHost = grafanaScopes.size
+    ? createGrafanaHost({
+        policies: grafanaScopes,
+        readSqlResult: (text, context) =>
+          sqlHost.readResult(text, context, { includeInternalExpiry: true }),
+        verifyIdentity,
+      })
+    : null;
   let manager, server;
   let closing;
   const close = () => {
@@ -131,6 +228,7 @@ export async function startAgentServer(config) {
       memoryMiB: config.memoryMiB,
       cpus: config.cpus,
       maxRuntimes: config.maxRuntimes,
+      pluginDevelopmentActors: [...pluginScopes.keys()],
     });
     server = await createAgentGateway({
       gatewayOrigin: config.gatewayOrigin,
@@ -141,39 +239,78 @@ export async function startAgentServer(config) {
         manager.setAllowedOrigins(actor, actorOrigins.get(actor.key) ?? []);
         return runtime;
       },
-      ingestionRequest: (text, context) =>
+      grafanaRequest: grafanaHost ? grafanaHost.request : undefined,
+      grafanaData: grafanaHost ? grafanaHost.read : undefined,
+      grafanaOriginByActor: new Map(
+        [...grafanaScopes].map(([actorKey, display]) => [
+          actorKey,
+          display.grafanaOrigin,
+        ]),
+      ),
+      sqlRequest: sqlHost
+        ? (text, context) => sqlHost.execute(text, context)
+        : undefined,
+      sqlResultRequest: sqlHost
+        ? (text, context) => sqlHost.readResult(text, context)
+        : undefined,
+      catalogRequest: (text, context) => {
+        const policy = catalogScopes.get(context.actor.key);
+        if (!policy) throw new CatalogError("catalog_not_configured", 403);
+        return nativeCatalog(text, {
+          ...context,
+          propertyNames: policy.propertyNames,
+          frontendOrigin: config.datahubOrigin,
+        });
+      },
+      ingestionRequest: config.readOnlyCore ? undefined : (text, context) =>
         nativeIngestion(text, {
           ...context,
           sources: sourcePolicies.get(context.actor.key) ?? [],
           frontendOrigin: config.datahubOrigin,
         }),
-      semanticRequest: (text, context) =>
-        analyzeBounded(context.actor, new SemanticError("semantic_capacity_exhausted", 429), () => semanticHost(text, {
-          ...context,
-          runtime: { state: async (sessionId) => taskRuntime(await context.getRuntime(), context.assertActive).state(sessionId) },
-          sources: sourcePolicies.get(context.actor.key) ?? [],
-          frontendOrigin: config.datahubOrigin,
-        })),
+      semanticRequest: config.readOnlyCore ? undefined : (text, context) =>
+        analyzeBounded(
+          context.actor,
+          new SemanticError("semantic_capacity_exhausted", 429),
+          () =>
+            semanticHost(text, {
+              ...context,
+              runtime: {
+                state: async (sessionId) =>
+                  taskRuntime(
+                    await context.getRuntime(),
+                    context.assertActive,
+                  ).state(sessionId),
+              },
+              sources: sourcePolicies.get(context.actor.key) ?? [],
+              frontendOrigin: config.datahubOrigin,
+            }),
+        ),
       discoveryRequest: (text, context) =>
         // One shared parser pool covers Discovery, Semantic and workspace import.
         // Runtime and SQL concurrency remain independently controlled.
-        analyzeBounded(context.actor, new DiscoveryError("discovery_capacity_exhausted", 429), () => nativeDiscovery(text, {
-          actor: context.actor,
-          assertActive: context.assertActive,
-          sources: discoveryScopes.get(context.actor.key) ?? [],
-          frontendOrigin: config.datahubOrigin,
-          cookieHeader: context.cookieHeader,
-        })),
-      taskRequest: async (text, context) => {
+        analyzeBounded(
+          context.actor,
+          new DiscoveryError("discovery_capacity_exhausted", 429),
+          () =>
+            nativeDiscovery(text, {
+              actor: context.actor,
+              assertActive: context.assertActive,
+              signal: context.signal,
+              pluginDevelopment: pluginScopes.get(context.actor.key),
+              pluginActivations: activationScopes.get(context.actor.key),
+              sources: discoveryScopes.get(context.actor.key) ?? [],
+              frontendOrigin: config.datahubOrigin,
+              cookieHeader: context.cookieHeader,
+            }),
+        ),
+      taskRequest: config.readOnlyCore ? undefined : async (text, context) => {
         const compiling = [
           "prepare_workspace_import",
           "respond_workspace_import",
         ].includes(JSON.parse(text)?.action);
         if (compiling) {
-          if (
-            analysisActive.has(context.actor.key) ||
-            analysisActive.size >= 2
-          )
+          if (analysisActive.has(context.actor.key) || analysisActive.size >= 2)
             throw new DiscoveryError("discovery_capacity_exhausted", 429);
           analysisActive.add(context.actor.key);
         }

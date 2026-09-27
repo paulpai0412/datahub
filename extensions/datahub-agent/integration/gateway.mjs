@@ -7,6 +7,9 @@ import { BrowserGrants, GrantError } from "./browser-grants.mjs";
 import { IngestionError } from "./native-ingestion.mjs";
 import { DiscoveryError } from "./native-discovery.mjs";
 import { SemanticError } from "./native-semantic.mjs";
+import { CatalogError } from "./native-catalog.mjs";
+import { SqlError } from "./native-sql.mjs";
+import { GrafanaError } from "./native-grafana.mjs";
 import { TaskRecordError } from "./task-records.mjs";
 import manifest from "../pi-web/app/manifest.ts";
 import {
@@ -290,6 +293,12 @@ export async function createAgentGateway({
   taskRequest,
   discoveryRequest,
   semanticRequest,
+  catalogRequest,
+  sqlRequest,
+  sqlResultRequest,
+  grafanaRequest,
+  grafanaData,
+  grafanaOriginByActor,
   mfeDirectory,
   publicDirectory = fileURLToPath(
     new URL("../pi-web/public/", import.meta.url),
@@ -313,6 +322,10 @@ export async function createAgentGateway({
     ["/agent/tasks", { handler: taskRequest, name: "tasks" }],
     ["/agent/discovery", { handler: discoveryRequest, name: "discovery" }],
     ["/agent/semantic", { handler: semanticRequest, name: "semantic" }],
+    ["/agent/catalog", { handler: catalogRequest, name: "catalog" }],
+    ["/agent/sql", { handler: sqlRequest, name: "sql" }],
+    ["/agent/sql-result", { handler: sqlResultRequest, name: "sql" }],
+    ["/agent/grafana", { handler: grafanaRequest, name: "grafana" }],
   ]);
   const staticFiles = new Map();
   for (const name of await readdir(mfeDirectory)) {
@@ -390,6 +403,27 @@ export async function createAgentGateway({
         response.end(request.method === "HEAD" ? undefined : publicAsset.bytes);
         return;
       }
+      if (rootHost && pathname === "/agent/grafana-data") {
+        if (request.method !== "GET")
+          throw new HttpError(405, "method_not_allowed");
+        if (!grafanaData) throw new HttpError(403, "grafana_not_configured");
+        if (
+          request.socket.remoteAddress !== "127.0.0.1" ||
+          request.headers.origin ||
+          request.headers["sec-fetch-site"] ||
+          request.url.length > 128
+        )
+          throw new HttpError(403, "grafana_scope_denied");
+        const url = new URL(request.url, gateway);
+        if (url.searchParams.size !== 1 || !url.searchParams.has("cap"))
+          throw new HttpError(403, "grafana_scope_denied");
+        const rows = await grafanaData(url.searchParams.get("cap"), {
+          assertGrant: (grantId, actorKey) =>
+            grants.assertGrant(grantId, actorKey),
+        });
+        json(response, 200, rows);
+        return;
+      }
       if (rootHost) {
         if (request.method === "GET" && staticFiles.has(request.url)) {
           response.writeHead(200, { "content-type": "application/javascript" });
@@ -434,9 +468,13 @@ export async function createAgentGateway({
             : operations.has(request.url)
               ? ["grantId", "revokeToken", "request"]
               : ["grantId", "revokeToken"],
-          request.url === "/agent/semantic"
+          request.url === "/agent/discovery"
+            ? 131072 // Escaped source capsule + parent proof; legacy intents stay 8KB in Discovery.
+            : request.url === "/agent/semantic"
             ? 49152 // JSON-escaped 24KB intent plus parent-only proof envelope.
-            : ["/agent/tasks", "/agent/discovery"].includes(request.url)
+            : ["/agent/tasks", "/agent/discovery", "/agent/catalog"].includes(
+                  request.url,
+                )
               ? 16384
               : 4096,
         );
@@ -452,29 +490,51 @@ export async function createAgentGateway({
             grantId,
             revokeToken,
             launchUrl: `${gateway.protocol}//${actorKey}.${gateway.host}/bootstrap#${ticket}`,
+            ...(grafanaOriginByActor?.has(actorKey)
+              ? { grafanaOrigin: grafanaOriginByActor.get(actorKey) }
+              : {}),
           });
         } else if (operations.has(request.url)) {
           const { handler, name } = operations.get(request.url);
           if (!handler) throw new HttpError(403, `${name}_not_configured`);
           const actor = await verifyIdentity(request.headers.cookie);
+          const interruptible =
+            ["/agent/sql", "/agent/sql-result", "/agent/discovery"].includes(request.url);
+          const interrupted = new AbortController();
+          const disconnect = () => interrupted.abort();
+          if (interruptible) {
+            request.once("aborted", disconnect);
+            response.once("close", disconnect);
+          }
           const assertActive = () => {
-            if (response.destroyed)
+            if (response.destroyed || (interruptible && interrupted.signal.aborted))
               throw new HttpError(409, "ingestion_request_closed");
             grants.renew(input.grantId, actor, input.revokeToken);
           };
-          assertActive();
-          const result = await handler(input.request, {
-            actor,
-            cookieHeader: request.headers.cookie,
-            assertActive,
-            ...(request.url === "/agent/tasks"
-              ? { runtime: await runtimeForActor(actor) }
-              : request.url === "/agent/semantic"
-                ? { getRuntime: () => runtimeForActor(actor) }
+          try {
+            assertActive();
+            const result = await handler(input.request, {
+              actor,
+              cookieHeader: request.headers.cookie,
+              assertActive,
+              ...(interruptible ? { signal: interrupted.signal } : {}),
+              ...(request.url === "/agent/grafana"
+                ? { grantId: input.grantId }
                 : {}),
-          });
-          assertActive();
-          json(response, 200, result);
+              ...(request.url === "/agent/tasks"
+                ? { runtime: await runtimeForActor(actor) }
+                : request.url === "/agent/semantic"
+                  ? { getRuntime: () => runtimeForActor(actor) }
+                  : {}),
+            });
+            assertActive();
+            json(response, 200, result);
+          } finally {
+            if (interruptible) {
+              request.off("aborted", disconnect);
+              response.off("close", disconnect);
+            }
+          }
         } else {
           if (request.url === "/agent/heartbeat") {
             try {
@@ -554,6 +614,9 @@ export async function createAgentGateway({
         error instanceof IngestionError ||
         error instanceof DiscoveryError ||
         error instanceof SemanticError ||
+        error instanceof CatalogError ||
+        error instanceof SqlError ||
+        error instanceof GrafanaError ||
         error instanceof TaskRecordError;
       const status = knownError
         ? error.status

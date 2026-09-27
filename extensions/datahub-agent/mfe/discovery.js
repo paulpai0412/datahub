@@ -18,7 +18,7 @@ export function installDiscoveryBridge({ frame, origin, send }) {
       reply({ error: "discovery_request_busy" });
       return;
     }
-    if (typeof event.data.body !== "string" || event.data.body.length > 8192) {
+    if (typeof event.data.body !== "string" || new TextEncoder().encode(event.data.body).length > 60000) {
       reply({ error: "invalid_discovery_request" });
       return;
     }
@@ -30,13 +30,20 @@ export function installDiscoveryBridge({ frame, origin, send }) {
     };
     try {
       const request = JSON.parse(event.data.body);
+      const development = ["plugin_development_contract", "plugin_development_references", "plugin_development_reference", "plugin_development_verify"].includes(request?.action);
+      if (!development && event.data.body.length > 8192) throw new Error("invalid_discovery_request");
       if (
         !request ||
         ![
           "list_sources",
           "analyze",
           "list_workspaces",
+          "list_plugins",
           "analyze_workspace",
+          "plugin_development_contract",
+          "plugin_development_references",
+          "plugin_development_reference",
+          "plugin_development_verify",
         ].includes(request.action)
       )
         throw new Error("invalid_discovery_request");

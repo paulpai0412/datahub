@@ -34,6 +34,12 @@ import {
   projectTrustReloadOptions,
 } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
+import discoveryPluginDevelopment from "./discovery-plugin-dev-extension";
+import { pluginDevelopmentResources } from "./discovery-plugin-profile";
+import {
+  PLUGIN_DEVELOPMENT_TOOL, PLUGIN_DEVELOPMENT_TOOLS,
+  isPluginDevelopmentSelection, validatePluginDevelopmentSelection,
+} from "./tool-presets";
 import { notifySessionComplete } from "./web-push";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
 import type { SlashCommandInfo } from "@earendil-works/pi-coding-agent";
@@ -149,6 +155,7 @@ type ExtensionCommandContextActionsLike = {
 type AgentSessionWrapperOptions = {
   exactSystemPrompt?: () => string;
   chatOnly?: boolean;
+  pluginDevelopment?: boolean;
   onAgentRunComplete?: AgentRunCompleteListener;
   suppressCompletionNotifications?: boolean;
 };
@@ -282,6 +289,8 @@ function withExtensionTools(
   toolNames: string[],
 ): string[] {
   if (toolNames.length === 0) return [];
+  validatePluginDevelopmentSelection(toolNames);
+  if (isPluginDevelopmentSelection(toolNames)) return [...PLUGIN_DEVELOPMENT_TOOLS];
 
   const codingToolNames = new Set(CODING_TOOL_NAMES);
   const selectedToolNames = resolveShellTools(
@@ -291,7 +300,7 @@ function withExtensionTools(
   const extensionToolNames = session
     .getAllTools()
     .map((t) => t.name)
-    .filter((name) => !codingToolNames.has(name));
+    .filter((name) => !codingToolNames.has(name) && name !== PLUGIN_DEVELOPMENT_TOOL);
 
   return [...new Set([...selectedToolNames, ...extensionToolNames])];
 }
@@ -322,6 +331,7 @@ export class AgentSessionWrapper {
   private extensionBindingError: unknown = null;
   private readonly exactSystemPrompt?: () => string;
   private readonly chatOnly: boolean;
+  private readonly pluginDevelopment: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
   private readonly suppressCompletionNotifications: boolean;
   private unsubscribe: (() => void) | null = null;
@@ -338,6 +348,7 @@ export class AgentSessionWrapper {
   ) {
     this.exactSystemPrompt = options.exactSystemPrompt;
     this.chatOnly = options.chatOnly ?? false;
+    this.pluginDevelopment = options.pluginDevelopment ?? false;
     this.onAgentRunComplete = options.onAgentRunComplete;
     this.suppressCompletionNotifications =
       options.suppressCompletionNotifications ?? false;
@@ -381,6 +392,10 @@ export class AgentSessionWrapper {
 
   isChatOnly(): boolean {
     return this.chatOnly;
+  }
+
+  isPluginDevelopment(): boolean {
+    return this.pluginDevelopment;
   }
 
   hasSuppressedCompletionNotifications(): boolean {
@@ -539,6 +554,9 @@ export class AgentSessionWrapper {
   }
 
   setActiveToolSelection(toolNames: string[]): void {
+    if (this.pluginDevelopment !== isPluginDevelopmentSelection(toolNames)) {
+      throw new Error("Changing the development resource profile requires session recreation");
+    }
     this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
     this.applyExactSystemPrompt();
   }
@@ -1191,6 +1209,7 @@ export class AgentSessionWrapper {
         }
 
         case "bash": {
+          if (this.pluginDevelopment) throw new Error("Shell execution is unavailable in plugin development sessions");
           if (
             this.pendingPromptCount > 0 ||
             this.inner.isStreaming ||
@@ -2108,14 +2127,16 @@ export async function setRpcSessionTools(
 
   const hasCurrentResourcePolicy =
     typeof existing.isChatOnly === "function" &&
+    typeof existing.isPluginDevelopment === "function" &&
     typeof existing.setActiveToolSelection === "function";
-  const crossesChatOnlyBoundary =
+  const crossesResourceBoundary =
     !hasCurrentResourcePolicy ||
-    existing.isChatOnly() !== (toolNames.length === 0);
+    existing.isChatOnly() !== (toolNames.length === 0) ||
+    existing.isPluginDevelopment() !== isPluginDevelopmentSelection(toolNames);
   appendSessionToolSelection(existing.inner.sessionManager, toolNames);
   invalidateSessionListCache();
 
-  if (!crossesChatOnlyBoundary) {
+  if (!crossesResourceBoundary) {
     existing.setActiveToolSelection(toolNames);
     return { session: existing, sessionId, recreated: false };
   }
@@ -2342,6 +2363,10 @@ export async function startRpcSession(
       );
   const selectedToolNames =
     subagentResources?.tools ?? persistedToolNames ?? requestedToolNames;
+  const pluginDevelopment = isPluginDevelopmentSelection(selectedToolNames);
+  if (pluginDevelopment && (subagentResources || process.env.DATAHUB_DISCOVERY_PLUGIN_DEVELOPMENT !== "true")) {
+    throw new Error("Discovery plugin development is not enabled for this session");
+  }
   if (
     !subagentResources &&
     persistedToolNames === undefined &&
@@ -2370,7 +2395,7 @@ export async function startRpcSession(
       // tool registry — so they were unavailable in Pi Web sessions even though the
       // `pi` CLI keeps them. Leaving the allow-list unset lets the SDK register all
       // tools (and activate extension tools); we narrow the ACTIVE set below.
-      toolsOption = selectedToolNames.length === 0 ? [] : undefined;
+      toolsOption = pluginDevelopment ? [...PLUGIN_DEVELOPMENT_TOOLS] : selectedToolNames.length === 0 ? [] : undefined;
     }
 
     // Build services first so extension-registered providers are available
@@ -2381,7 +2406,7 @@ export async function startRpcSession(
       ? subagentLoadsResources
         ? projectTrustReloadOptions(sessionCwd, agentDir)
         : undefined
-      : chatOnly
+      : chatOnly || pluginDevelopment
         ? undefined
         : projectTrustReloadOptions(sessionCwd, agentDir);
     const settingsManager = SettingsManager.create(sessionCwd, agentDir);
@@ -2410,7 +2435,9 @@ export async function startRpcSession(
           }
         : chatOnly
           ? CHAT_ONLY_RESOURCE_LOADER_OPTIONS
-          : {
+          : pluginDevelopment
+            ? pluginDevelopmentResources(discoveryPluginDevelopment)
+            : {
               additionalExtensionPaths: process.env.PI_WEB_MCP_ADAPTER
                 ? [process.env.PI_WEB_MCP_ADAPTER]
                 : [],
@@ -2438,7 +2465,7 @@ export async function startRpcSession(
     );
     const effectiveInitialModel =
       initialModel &&
-      (!allowInitialModelFallback ||
+      (!allowInitialModelFallback || pluginDevelopment ||
         scope.visible.some(
           (model) =>
             model.provider === initialModel.provider &&
@@ -2458,6 +2485,9 @@ export async function startRpcSession(
     const restoredModel = savedModel
       ? services.modelRuntime.getModel(savedModel.provider, savedModel.modelId)
       : undefined;
+    if (pluginDevelopment && savedModel && (!restoredModel || !services.modelRuntime.hasConfiguredAuth(savedModel.provider))) {
+      throw new Error("The saved model is unavailable in the development profile; no provider fallback is permitted");
+    }
     const initial = hasExistingMessages
       ? null
       : selectInitialModelScope(scope, {
@@ -2495,6 +2525,11 @@ export async function startRpcSession(
         : {}),
     });
 
+    if (pluginDevelopment && !inner.getAllTools().some(tool => tool.name === PLUGIN_DEVELOPMENT_TOOL)) {
+      await inner.dispose();
+      throw new Error("Discovery development tool unavailable; session not started");
+    }
+
     const persistedPreferences = await persistExplicitStartupPreferences(
       services.settingsManager,
       {
@@ -2523,7 +2558,7 @@ export async function startRpcSession(
       inner.setActiveToolsByName(
         withExtensionTools(
           inner,
-          selectedToolNames ?? inner.getActiveToolNames(),
+          selectedToolNames ?? inner.getActiveToolNames().filter(name => name !== PLUGIN_DEVELOPMENT_TOOL),
         ),
       );
     }
@@ -2539,6 +2574,7 @@ export async function startRpcSession(
     const wrapper = new AgentSessionWrapper(inner, {
       exactSystemPrompt,
       chatOnly,
+      pluginDevelopment,
       onAgentRunComplete: (completedSessionId) => {
         void notifySessionComplete(completedSessionId).catch((error) => {
           console.error(

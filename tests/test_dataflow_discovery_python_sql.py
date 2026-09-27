@@ -115,7 +115,7 @@ class SqlTraceTests(unittest.TestCase):
         bound = {use["sql"]["line"]: origins[use["connection"]["engine_origin"]["assignment_id"]]
                  for use in result["uses"] if use["binding_status"] == "SYNTAX_BOUND"}
         source_names = ["_PRODUCT_SQL", "_CUSTOMER_SQL", "_TERRITORY_SQL", "_FACT_SQL"]
-        target_names = ["_INSERT_DATE_SQL", "_UPDATE_TERRITORY_SQL", "_INSERT_TERRITORY_SQL", "_UPDATE_PRODUCT_SQL", "_INSERT_PRODUCT_SQL", "_UPDATE_CUSTOMER_SQL", "_INSERT_CUSTOMER_SQL", "_UPDATE_FACT_SQL", "_INSERT_FACT_SQL", "_TARGET_METRICS_SQL", "_VIEW_COUNT_SQL"]
+        target_names = ["_INSERT_DATE_SQL", "_UPDATE_TERRITORY_SQL", "_INSERT_TERRITORY_SQL", "_UPDATE_PRODUCT_SQL", "_INSERT_PRODUCT_SQL", "_UPDATE_CUSTOMER_SQL", "_INSERT_CUSTOMER_SQL", "_UPDATE_FACT_SQL", "_INSERT_FACT_SQL", "_TARGET_METRICS_SQL", "_VIEW_METRICS_SQL", "_UNKNOWN_MEMBERS_SQL"]
         for name in source_names:
             self.assertEqual(bound[definitions[name]], "source", name)
         for name in target_names:
