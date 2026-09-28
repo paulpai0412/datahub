@@ -1,6 +1,6 @@
 {
   "upstream_lock_sha256": "639fa77b24701537ef988158b479e396c0bfd49cf5ee3a72d041147effee9270",
-  "patch_sha256": "49be7e1f8fc2e007a73ca3a3fc791aaf0a347bf700ba950f76209cd091164fc0",
+  "patch_sha256": "72a6cf62deb10f7aaf867cb954b7dcee9fe63cfb2deef1560c52273bd94c9350",
   "files": {
     ".github/workflows/ci.yml": {
       "sha256": "8264c281e466357e508448af8e14063f69a45bef52ccf8dd077ef729f99cd3ca",
@@ -399,7 +399,7 @@
       "mode": 420
     },
     "components/AppShell.tsx": {
-      "sha256": "e025a6cb5b920e57f2636c80dc109a4664fa49468651a45c884721c98f8f66c9",
+      "sha256": "6e31dfd22a8a5b1e525defee2f504f94b253ab50f4902f01d023b2c9d9c18c00",
       "mode": 420
     },
     "components/AppShell.workspace-memory.test.mjs": {
@@ -431,7 +431,7 @@
       "mode": 420
     },
     "components/ChatInput.tsx": {
-      "sha256": "197c446bd9e82fbfdeeac649dccec15268bc585ad96f53d269a968cfea1535f2",
+      "sha256": "9edb98df5826a7f7494e2ae6a86cdf193f78cbd87cb478bb629b01ca5584f182",
       "mode": 420
     },
     "components/ChatMinimap.module.css": {
@@ -451,7 +451,7 @@
       "mode": 420
     },
     "components/ChatWindow.notices.test.mjs": {
-      "sha256": "5b2de49661eddb77f91980db1fdcd96131dee8c61bee8658da7afbaeacc2d082",
+      "sha256": "9dbb42fdf9bd03d8353796bb1b3afae1bf1482fc512fd64a44f380dbf661aa0b",
       "mode": 420
     },
     "components/ChatWindow.process-details.test.mjs": {
@@ -520,6 +520,10 @@
     },
     "components/DataHubIngestionBridge.tsx": {
       "sha256": "51daa33784890554641ce1857680ac2356cf5debfe34ae59ec0f8c4648e5fd91",
+      "mode": 420
+    },
+    "components/DataHubPluginPreview.tsx": {
+      "sha256": "c1567f0e0e84cf022b367f73861dffcd5b7d3a8d46c5e725ccd5f4a8695469cb",
       "mode": 420
     },
     "components/DataHubQueryReceipt.tsx": {
@@ -619,7 +623,7 @@
       "mode": 420
     },
     "components/MessageView.tsx": {
-      "sha256": "45185019e66035cf22a61689dacad9a4547f73e550f2f29af7da7841f289487d",
+      "sha256": "8cbf1a3fb1e087039f4d132b8d5fefd9585006f07102e43822147646ba17eec0",
       "mode": 420
     },
     "components/MobilePwaLayout.test.mjs": {
@@ -839,15 +843,15 @@
       "mode": 420
     },
     "hooks/model-scope-startup.test.mjs": {
-      "sha256": "1b545be4116823ad2d36622bb16def0254909907bce685283219dc8e8bb86c52",
+      "sha256": "4fef02c4f316e86c0ebfe5f4071ee1841479ce2ef713dae6a70e248c1ec4152f",
       "mode": 420
     },
     "hooks/model-switching.test.mjs": {
-      "sha256": "dc91c4100b283b6273ecf065e95128e6a65530916be9ac1f7baa7b49f818f8d2",
+      "sha256": "c483de9e0f1a777207d3750bfbe66e581b3794eda165340588f27b220a4911b8",
       "mode": 420
     },
     "hooks/useAgentSession.test.mjs": {
-      "sha256": "5291d474ac5ba390224c63d96f43e57f2c98dcdb4dba4d2e6920c0ed29fd514b",
+      "sha256": "c110257fb7320b59a1863607abe03581357719c858807580bc812a5994f00bd7",
       "mode": 420
     },
     "hooks/useAgentSession.ts": {
@@ -1071,11 +1075,11 @@
       "mode": 420
     },
     "lib/datahub-etl-extension.ts": {
-      "sha256": "18cae8d054287a19b3d0f2a39b10b0093c4672085263d05e33d6590a72f4be71",
+      "sha256": "62b3f4ad4fd3377820e952aa1246865345c5da782d4e833277b04b95d33f50a0",
       "mode": 420
     },
     "lib/datahub-extension-entry.ts": {
-      "sha256": "654a9d2407e7614cba637de98a67f811d9b1020847ccabce3d52571047091a7d",
+      "sha256": "1284ab9b641fb6df4c8c018a7284640825de6c9d40ab1cef120ac4a28c45c5f8",
       "mode": 420
     },
     "lib/datahub-grafana-extension.test.mjs": {
@@ -1108,6 +1112,38 @@
     },
     "lib/directory-browser.ts": {
       "sha256": "23994a4062ddea191cd020b67b00948437ec66156819f55fabe0603d6e92212c",
+      "mode": 420
+    },
+    "lib/discovery-plugin-authoring-extension.ts": {
+      "sha256": "c5769f8e648c362b779c745b475bf9e4ddab59376a23c73c336dd9d6ea953f81",
+      "mode": 420
+    },
+    "lib/discovery-plugin-candidates.test.mjs": {
+      "sha256": "f0bde782a003dd815033590beef39b0005efdfa1142d74bce4748119e9dd0e14",
+      "mode": 420
+    },
+    "lib/discovery-plugin-candidates.ts": {
+      "sha256": "01b439f99b3c908d10d49adbcc9e3acb91938f66253d894b67a487946d7b5214",
+      "mode": 420
+    },
+    "lib/discovery-plugin-dev-extension.test.mjs": {
+      "sha256": "150a2cd20e5f88e1edc000d59f57278e1db012dae7d8c72a294a84a9aa3a7655",
+      "mode": 420
+    },
+    "lib/discovery-plugin-dev-extension.ts": {
+      "sha256": "f511f826f7ac8614a922c21f922b28f1018e7c4cd008fe2000930402fdb2c394",
+      "mode": 420
+    },
+    "lib/discovery-plugin-preview.ts": {
+      "sha256": "32baed5a603d9d1289d6bf8e5164727012e19d73797000dec8b29e6a9de32265",
+      "mode": 420
+    },
+    "lib/discovery-plugin-profile.test.mjs": {
+      "sha256": "34a27ffbc4d4d657009f0393bb2fcb8df713c622ecf62b5d428ee8893620cf00",
+      "mode": 420
+    },
+    "lib/discovery-plugin-profile.ts": {
+      "sha256": "326676ead2c5f337ac4a5f0293cb03de545c3c6d91331a1fa954a42d6f4b292d",
       "mode": 420
     },
     "lib/draft-store.ts": {
@@ -1539,7 +1575,7 @@
       "mode": 420
     },
     "lib/rpc-manager.ts": {
-      "sha256": "a42f7959631fcc5fd725b4a56d264a411287274b115da528b2a83f6a88f77628",
+      "sha256": "9910766faf5fe8ad3b6f7a280c0f29cc456e53277c2067f48a3aff7cbc8de845",
       "mode": 420
     },
     "lib/rpc-session-info.test.mjs": {
@@ -1572,6 +1608,14 @@
     },
     "lib/session-file-references.ts": {
       "sha256": "6c00f3a4a6a274323fdf86fdc79487c043244dfc64e2ce927b13d55bf8d5f230",
+      "mode": 420
+    },
+    "lib/session-history.test.mjs": {
+      "sha256": "aed591205ab3684b1a8b8c8524247489621adc54aacb58c77391374475725a75",
+      "mode": 420
+    },
+    "lib/session-history.ts": {
+      "sha256": "51ad0c96c510e21150d24aca9937d0e2c16cd29a9c9bf28e1c1ae1931ffd988a",
       "mode": 420
     },
     "lib/session-list-scanner.bench.mjs": {
@@ -1659,7 +1703,7 @@
       "mode": 420
     },
     "lib/session-tool-selection.ts": {
-      "sha256": "12492fde02f4c30c3312546a9d96fa8e6506a155e9edd8889670275175588dec",
+      "sha256": "8a87039b3f9e47f1b41ee588e0e0f7d3ec3382f357c2c5d1be6dc245d86b92ff",
       "mode": 420
     },
     "lib/session-tree.test.mjs": {
@@ -1855,7 +1899,7 @@
       "mode": 420
     },
     "lib/tool-presets.ts": {
-      "sha256": "fa799237320efca8a52547c2753fa7781f3b73044b7e9e13da61a6ad148657d3",
+      "sha256": "a6d8ad60cdd87a82525c60f5c798978b0aa6e79c0cac0dfba9a8bbe0e8bfad33",
       "mode": 420
     },
     "lib/tool-result-images.ts": {
@@ -2227,11 +2271,23 @@
       "mode": 420
     },
     "skills/datahub-etl/SKILL.md": {
-      "sha256": "b83477c822c2637416fbf7d0ce9ba278637fb859f7b8e18894655030ad523082",
+      "sha256": "f1ced4e640a73d0f97800ecaf06bb189542ccd7604a63c05f2a7992261ec2e11",
       "mode": 420
     },
     "skills/datahub-semantic/SKILL.md": {
       "sha256": "101220c2cb0a1e94083bccc6e869e6c28eb92c49afa2160a2d5ab5dac76bccd9",
+      "mode": 420
+    },
+    "skills/discovery-plugin-dev/SKILL.md": {
+      "sha256": "2801e552afbdb6682cfd71126f9c498dc443ed368fe1d23e6644038e85aa588a",
+      "mode": 420
+    },
+    "skills/discovery-plugin-dev/references/asset-plugin.md": {
+      "sha256": "22e09bbea417051efb438e0a19acb222065436f208995582d2ac49d3d36a9ce0",
+      "mode": 420
+    },
+    "skills/discovery-plugin-dev/references/language-plugin.md": {
+      "sha256": "df7cdc1574cabadf897ea2191821aaa59acf1ce8d1f35c0d8aa1b771c016e3c4",
       "mode": 420
     },
     "tailwind.config.ts": {

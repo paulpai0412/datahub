@@ -103,7 +103,9 @@ def _query_conditions(query, scope, datasets):
                 raise CatalogBindingError('query_join_condition_unresolved')
             clauses.append(('join', join.args.get('on') or join))
         for kind, clause in clauses:
-            if clause is None:
+            # Set operations use a boolean DISTINCT flag, not a predicate AST.
+            # Their SELECT scopes are still visited for actual row conditions.
+            if clause is None or (kind == 'distinct' and isinstance(unit.expression, exp.SetOperation)):
                 continue
             origins = {}
             for column in clause.find_all(exp.Column):

@@ -24,7 +24,7 @@ test("new-session startup adopts server state only while explicit overrides are 
 
   assert.match(
     ensureSource,
-    /result\.model && newSessionModelOverrideRef\.current === selectedModel/,
+    /result\.model\s*&&\s*newSessionModelOverrideRef\.current === selectedModel/,
   );
   assert.match(ensureSource, /setPendingModel\(result\.model\)/);
   assert.match(ensureSource, /setNewSessionDefaultModel\(result\.model\)/);
@@ -46,5 +46,5 @@ test("model-list refresh does not overwrite a live session or explicit thinking 
     loadModelsSource,
     /thinkingLevelOverrideRef\.current === null/,
   );
-  assert.match(loadModelsSource, /setThinkingLevel\(\(pinned[\s\S]*\?\? "auto"\)/);
+  assert.match(loadModelsSource, /setThinkingLevel\(\s*\(pinned[\s\S]*\?\? "auto",?\s*\)/);
 });

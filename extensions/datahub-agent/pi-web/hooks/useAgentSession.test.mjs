@@ -52,7 +52,7 @@ test("keeps the session event stream open through the idle grace window", () => 
   assert.match(source, /const EVENT_STREAM_IDLE_GRACE_MS = 30_000/);
   assert.match(
     graceSource,
-    /setTimeout\(\(\) => void checkServerIdle\(\), EVENT_STREAM_IDLE_GRACE_MS\)/,
+    /setTimeout\(\s*\(\) => void checkServerIdle\(\),\s*EVENT_STREAM_IDLE_GRACE_MS,?\s*\)/,
   );
   assert.match(
     graceSource,
@@ -69,7 +69,7 @@ test("keeps the session event stream open through the idle grace window", () => 
   assert.match(promptDoneSource, /scheduleEventStreamClose\(sid\)/);
   assert.match(
     sendSource,
-    /const definitivelyRejected = !promptRequestStarted/,
+    /const definitivelyRejected =\s*!promptRequestStarted/,
   );
   assert.match(
     sendSource,
@@ -77,7 +77,7 @@ test("keeps the session event stream open through the idle grace window", () => 
   );
   assert.match(
     sendSource,
-    /restoreSubmission\(message, images, composerDraftKey\);[\s\S]*?if \(sentSessionId\) \{[\s\S]*?reconcileAgentState\(sentSessionId\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?closeEvents\(\)/,
+    /restoreSubmission\(\s*draft\?\.value \?\? message,\s*images,\s*composerDraftKey,\s*draft\?\.catalogReferences,?\s*\);[\s\S]*?if \(sentSessionId\) \{[\s\S]*?reconcileAgentState\(sentSessionId\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?closeEvents\(\)/,
   );
   assert.doesNotMatch(
     sendSource,
@@ -118,7 +118,7 @@ test("opening System or Tools lazily starts a dormant session without sending a 
 
   assert.match(
     loadSystemInfoSource,
-    /sessionIdRef\.current \?\? await ensureNewSession\(\)/,
+    /sessionIdRef\.current \?\? \(await ensureNewSession\(\)\)/,
   );
   assert.doesNotMatch(loadSystemInfoSource, /promoteNewSession\(\)/);
   assert.match(
@@ -173,9 +173,9 @@ test("new-session promotion rekeys drafts before publishing the real session", (
   assert.match(promoteSource, /input\.rekeyDraft\(provisionalDraftKey, sid\)/);
   assert.ok(
     promoteSource.indexOf("input.rekeyDraft(provisionalDraftKey, sid)") <
-      promoteSource.indexOf("onSessionCreated?.({"),
+      promoteSource.indexOf("onSessionCreated?.("),
   );
-  assert.match(promoteSource, /}, provisionalDraftKey\)/);
+  assert.match(promoteSource, /},\s*provisionalDraftKey,?\s*\)/);
   assert.match(
     chatWindowSource,
     /draftKey=\{session\?\.id \?\? newSessionDraftKey \?\? undefined\}/,
@@ -206,7 +206,7 @@ test("fresh sessions use the preference while persisted and live sessions restor
   );
   assert.match(
     source,
-    /d\.toolNames !== undefined \? getPresetFromToolNames\(d\.toolNames\) : "default"/,
+    /d\.toolNames !== undefined\s*\? getPresetFromToolNames\(d\.toolNames\)\s*: "default"/,
   );
   assert.match(changeSource, /setPreferredToolPreset\(preset\)/);
   assert.match(changeSource, /\(sid, \{ type: "set_tools", toolNames \}\)/);
@@ -218,12 +218,12 @@ test("the selector prefers the live wrapper model over persisted response metada
   assert.match(source, /model\?: \{ provider: string; id: string \}/);
   assert.match(
     source,
-    /const currentModel = currentModelOverride \?\? liveModel \?\? data\?\.context\.model \?\? pendingModel \?\? null/,
+    /const currentModel =\s*currentModelOverride\s*\?\?\s*liveModel\s*\?\?\s*data\?\.context\.model\s*\?\?\s*pendingModel\s*\?\?\s*null/,
   );
   assert.match(source, /syncLiveModel\(liveState\)/);
   assert.match(
     source,
-    /syncLiveModel\(state\);[\s\S]*?const busy = data\.running/,
+    /syncLiveModel\(state\);[\s\S]*?const busy =\s*data\.running/,
   );
 });
 
@@ -243,7 +243,7 @@ test("existing-session prompts rely on the persisted tool selection", () => {
 
 test("submission recovery updates live refs before a possible session rekey", () => {
   const restoreMethod = chatInputSource.slice(
-    chatInputSource.indexOf("    restoreSubmission(text:"),
+    chatInputSource.indexOf("    restoreSubmission("),
     chatInputSource.indexOf("    insertText(text:"),
   );
 
@@ -468,12 +468,12 @@ test("keeps one reducer-owned assistant partial and consumes Pi JSON deltas", ()
   );
   assert.match(
     streamSource,
-    /event\.assistantMessageEvent as ClientAssistantMessageEvent/,
+    /event\.assistantMessageEvent as\s*\|?\s*ClientAssistantMessageEvent\s*\|\s*undefined/,
   );
   assert.match(streamSource, /dispatch\(\{ type: "delta", event: delta \}\)/);
   assert.match(
     streamSource,
-    /delta\.type !== "toolcall_start" && delta\.type !== "toolcall_delta"/,
+    /delta\.type !== "toolcall_start"\s*&&\s*delta\.type !== "toolcall_delta"/,
   );
   assert.doesNotMatch(streamSource, /case "message_delta"/);
   assert.match(
@@ -662,9 +662,9 @@ test("restores an in-page session viewport without the default tail jump", () =>
   );
   assert.match(
     source,
-    /const scrollToMessage = useCallback\(\(element: HTMLElement, viewportOffset = 16\)/,
+    /const scrollToMessage = useCallback\(\s*\(element: HTMLElement, viewportOffset = 16\)/,
   );
-  assert.match(source, /container\.scrollTop\s+- viewportOffset/);
+  assert.match(source, /container\.scrollTop\s*-\s*viewportOffset/);
   assert.match(
     chatWindowSource,
     /deferInitialScroll: Boolean\(pendingScrollRestore\)/,
@@ -712,7 +712,7 @@ test("keeps a newly sent user message at the top while its response starts", () 
 
   assert.match(
     streamUpdateSource,
-    /!pendingScrollToUserRef\.current && isNearBottomRef\.current/,
+    /!pendingScrollToUserRef\.current\s*&&\s*isNearBottomRef\.current/,
   );
   assert.match(
     source,
