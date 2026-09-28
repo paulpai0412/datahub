@@ -40,9 +40,14 @@ class ProjectionTests(unittest.TestCase):
         _, cte = self.report("WITH q AS (SELECT CAST(Amount AS DECIMAL(20,2)) AS value FROM dbo.Orders) SELECT value AS rounded FROM q")
         self.assertEqual(cte["projection_status"], "DESCRIBED")
         self.assertEqual(cte["projections"][0]["outputs"][0]["origins"][0]["field_path"], "amount")
-        _, union = self.report("SELECT OrderID AS value FROM dbo.Orders UNION ALL SELECT Amount AS value FROM dbo.Orders")
-        self.assertEqual(union["projection_status"], "DESCRIBED")
-        self.assertEqual({s["field_path"] for s in union["projections"][0]["outputs"][0]["origins"]}, {"orderid", "amount"})
+        for operator in ("UNION ALL", "UNION"):
+            with self.subTest(operator=operator):
+                _, union = self.report(f"SELECT OrderID AS value FROM dbo.Orders WHERE Amount > 0 {operator} SELECT Amount AS value FROM dbo.Orders WHERE OrderID > 0")
+                self.assertEqual(union["projection_status"], "DESCRIBED")
+                projection = union["projections"][0]
+                self.assertEqual({s["field_path"] for s in projection["outputs"][0]["origins"]}, {"orderid", "amount"})
+                self.assertEqual({s["field_path"] for c in projection["conditions"] for s in c["origins"]}, {"orderid", "amount"})
+                self.assertTrue(all(c["predicate_semantics_verified"] is False for c in projection["conditions"]))
 
     def test_missing_and_ambiguous_columns_are_not_accepted(self):
         for sql in ("SELECT Missing AS value FROM dbo.Orders", "SELECT OrderID FROM dbo.Orders a JOIN dbo.Orders b ON a.OrderID=b.OrderID"):

@@ -76,9 +76,23 @@ class WriteParameterTests(unittest.TestCase):
                 self.assertEqual(context["write_statements"], [])
                 self.assertEqual(result["status"], "INCONCLUSIVE")
 
-    def test_sql_variables_unnamed_parameters_queries_and_foreign_columns_stay_unresolved(self):
+    def test_insert_select_describes_catalog_bound_values_not_bind_parameters(self):
+        result, context = self.report("INSERT INTO dbo.Orders (Amount) SELECT Amount FROM dbo.Orders WHERE OrderID > 0")
+        self.assertEqual(context["write_status"], "DESCRIBED")
+        slot = context["write_statements"][0]["slots"][0]
+        self.assertEqual(slot["field_path"], "amount")
+        self.assertEqual(slot["parameter_names"], [])
+        self.assertEqual(slot["value_kind"], "SQL_QUERY_VALUE")
+        dependencies = slot["sql_value_dependencies"]
+        self.assertEqual([(o["dataset_urn"], o["field_path"]) for o in dependencies["origins"]], [(urn(), "amount")])
+        self.assertEqual([o["field_path"] for o in dependencies["condition_origins"]], ["orderid"])
+        self.assertFalse(slot["parameter_values_verified"])
+        self.assertFalse(slot["transformation_semantics_verified"])
+        self.assertFalse(result["publication_authorized"])
+
+    def test_sql_variables_unnamed_parameters_subqueries_and_foreign_columns_stay_unresolved(self):
         for sql in ("UPDATE dbo.Orders SET Amount=@value", "UPDATE dbo.Orders SET Amount=?",
-                    "INSERT INTO dbo.Orders (Amount) SELECT Amount FROM dbo.Orders",
+                    "INSERT INTO dbo.Orders (Amount) SELECT Missing FROM dbo.Orders",
                     "UPDATE dbo.Orders SET Amount=(SELECT MAX(Amount) FROM dbo.Orders)",
                     "UPDATE dbo.Orders SET Amount=other.Amount+:x"):
             with self.subTest(sql=sql):

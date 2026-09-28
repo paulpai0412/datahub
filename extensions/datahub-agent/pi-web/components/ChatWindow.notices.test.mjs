@@ -25,7 +25,7 @@ test("renders temporary notices once at the top right of the chat column", () =>
 test("pauses only for a visible notice", () => {
   assert.match(
     hookSource,
-    /noticeState\.visible\.some\(\(notice\) => notice\.id === pausedNoticeId\)\) return/,
+    /noticeState\.visible\.some\(\(notice\) => notice\.id === pausedNoticeId\)\)\s*return/,
   );
 });
 

@@ -1,0 +1,10 @@
+# Optional first-party plugin mount for this project's official ingestion executor.
+# Prepare and verify a source snapshot first; never mount a mutable working tree.
+# Does not change the pinned official image or replace any Core files.
+services:
+  datahub-actions-quickstart:
+    volumes:
+      - type: bind
+        source: ${DISCOVERY_INGESTION_PLUGIN_DIR:?Prepare the reviewed Discovery ingestion source snapshot}
+        target: /opt/datahub/discovery-plugin
+        read_only: true

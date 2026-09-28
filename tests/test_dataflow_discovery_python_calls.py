@@ -15,11 +15,26 @@ def analyze(text):
     return analyze_factory_calls(SourceFile("pipeline.py", text, hashlib.sha256(data).hexdigest(), len(data)))
 
 
+def local_calls(result):
+    """Wrapper invocations are distinct from their public inline declarations."""
+    return [call for call in result["calls"] if call.get("factory_kind") != "public_inline"]
+
+
 class CallTests(unittest.TestCase):
+    def test_public_inline_declaration_is_separate_from_wrapper_invocations(self):
+        result = analyze(HEADER + "def run():\n    engine = build(config())\n")
+        inline = [call for call in result["calls"] if call.get("factory_kind") == "public_inline"]
+        self.assertEqual(len(inline), 1)
+        self.assertEqual(inline[0]["caller"], "build")
+        self.assertEqual(inline[0]["factory"], "sqlalchemy.create_engine")
+        self.assertFalse(inline[0]["execution_verified"])
+        self.assertEqual(inline[0]["engine_declaration"]["coordinates"]["database"]["kind"], "unresolved")
+        self.assertEqual([call["factory"] for call in local_calls(result)], ["build"])
+        self.assertNotEqual(inline[0]["id"], local_calls(result)[0]["id"])
     def test_or_and_conditional_remain_unevaluated_alternatives(self):
         result = analyze(HEADER + "def run(override, dry):\n    src = override or build(config())\n    dst = None if dry else (override or build(settings=config()))\n")
-        self.assertEqual(len(result["calls"]), 2)
-        for call in result["calls"]:
+        self.assertEqual(len(local_calls(result)), 2)
+        for call in local_calls(result):
             self.assertEqual(call["argument_binding"], "SYNTAX_ONLY")
             self.assertEqual(call["arguments"]["settings"]["qualified_name"], "config_api.connection")
             self.assertFalse(call["execution_verified"])
@@ -32,7 +47,7 @@ class CallTests(unittest.TestCase):
 
     def test_local_factory_and_config_callable_aliases(self):
         result = analyze(HEADER + "def run():\n    make = build\n    load = config\n    settings = load()\n    engine = make(settings)\n")
-        call = result["calls"][0]
+        call = local_calls(result)[0]
         self.assertEqual(call["factory"], "build")
         self.assertEqual(call["arguments"]["settings"], {"kind": "assignment_reference", "assignment_id": result["assignments"][2]["id"]})
         self.assertEqual(result["assignments"][2]["value"]["qualified_name"], "config_api.connection")
@@ -41,30 +56,31 @@ class CallTests(unittest.TestCase):
         for expression in ["build()", "build(config(), settings=config())", "build(*items)", "build(**items)", "build(extra=config())"]:
             with self.subTest(expression=expression):
                 result = analyze(HEADER + "def run():\n    engine = " + expression + "\n")
-                self.assertEqual(result["calls"][0]["argument_binding"], "UNRESOLVED")
-                self.assertEqual(result["calls"][0]["arguments"], {})
+                self.assertEqual(len(local_calls(result)), 1)
+                self.assertEqual(local_calls(result)[0]["argument_binding"], "UNRESOLVED")
+                self.assertEqual(local_calls(result)[0]["arguments"], {})
 
     def test_positional_only_and_omitted_defaults(self):
         header = HEADER.replace("def build(settings):", "def build(settings=None, /):")
         result = analyze(header + "def run():\n    engine = build()\n")
-        self.assertEqual(result["calls"][0]["omitted_parameters"], ["settings"])
-        self.assertEqual(result["calls"][0]["arguments"], {})
+        self.assertEqual(local_calls(result)[0]["omitted_parameters"], ["settings"])
+        self.assertEqual(local_calls(result)[0]["arguments"], {})
         result = analyze(header + "def run():\n    engine = build(settings=config())\n")
-        self.assertEqual(result["calls"][0]["argument_binding"], "UNRESOLVED")
+        self.assertEqual(local_calls(result)[0]["argument_binding"], "UNRESOLVED")
 
     def test_module_and_local_shadowing_do_not_select_old_definition(self):
         for tail in ["build = external\n", "def build(settings):\n    return external(settings)\n"]:
             result = analyze(HEADER + tail + "def run():\n    engine = build(config())\n")
-            self.assertEqual(result["calls"], [])
+            self.assertEqual(local_calls(result), [])
             self.assertIn("module_factory_binding_ambiguous", [item["reason"] for item in result["unresolved"]])
         result = analyze(HEADER + "def run(build):\n    engine = build(config())\n")
-        self.assertEqual(result["calls"], [])
+        self.assertEqual(local_calls(result), [])
         result = analyze(HEADER + "def run():\n    engine = build(config())\n    build = external\n")
-        self.assertEqual(result["calls"], [])
+        self.assertEqual(local_calls(result), [])
 
     def test_control_flow_boundary_stops_without_guessing_post_branch_bindings(self):
         result = analyze(HEADER + "def run(flag):\n    if flag:\n        build = external\n    engine = build(config())\n")
-        self.assertEqual(result["calls"], [])
+        self.assertEqual(local_calls(result), [])
         self.assertEqual(result["unresolved"][0]["reason"], "control_flow_or_mutation_not_traced")
 
     def test_literal_secrets_not_exported_and_references_not_expanded(self):
@@ -75,13 +91,13 @@ class CallTests(unittest.TestCase):
         lines.append("    engine = build(v59)")
         result = analyze(HEADER + "\n".join(lines) + "\n")
         self.assertLess(len(json.dumps(result)), 40000)
-        self.assertEqual(result["calls"][0]["arguments"]["settings"]["kind"], "assignment_reference")
+        self.assertEqual(local_calls(result)[0]["arguments"]["settings"]["kind"], "assignment_reference")
 
     def test_real_case_has_distinct_config_calls_and_no_selected_database(self):
         path = Path(__file__).resolve().parents[1] / "extensions/sales-datamart/src/sales_datamart/etl.py"
         result = analyze(path.read_text())
-        self.assertEqual(len(result["calls"]), 2)
-        origins = {call["arguments"]["config"]["qualified_name"] for call in result["calls"]}
+        self.assertEqual(len(local_calls(result)), 2)
+        origins = {call["arguments"]["config"]["qualified_name"] for call in local_calls(result)}
         self.assertEqual(origins, {"sales_datamart.config.source_connection", "sales_datamart.config.target_connection"})
         assignments = {item["name"]: item["value"] for item in result["assignments"] if item["function"] == "run_etl"}
         self.assertEqual(assignments["source"]["operator"], "or")

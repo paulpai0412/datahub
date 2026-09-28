@@ -2,8 +2,10 @@
 
 The Host supplies its captured dashboard, datasource scopes and ACL-bound reader.
 Only official SDK Model/Aspect objects and Graph.parse_sql_lineage are used. This
-prepares a complete in-memory batch; it never writes Catalog metadata. Do not put
-it behind a streaming REST sink or treat its output as publication approval.
+prepares a complete in-memory batch; it never writes Catalog metadata. The original
+transformer remains file-sink-only. The separate native-ingestion entrypoint admits
+only an operator-pinned dashboard and synchronous, version-conditional ingestion;
+its output is not general Agent publication approval.
 
 Supported: SDK 1.7.0.9 / SQLGlot 30.12.0, MSSQL, explicit single-SELECT projections, one SQL target
 per panel, no panel transformations or platform instances. SQL types/nullability
@@ -17,14 +19,14 @@ import hashlib
 import json
 import re
 from importlib.metadata import version
-from typing import Iterable
+from typing import Iterable, Self
 
 import sqlglot
 from sqlglot import expressions as exp
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.scope import traverse_scope
 from sqlglot.tokenizer_core import TokenType
-from datahub.emitter.mce_builder import make_chart_urn, make_schema_field_urn
+from datahub.emitter.mce_builder import make_chart_urn, make_dashboard_urn, make_schema_field_urn
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.ingestion.graph.client import DataHubGraph
 from datahub.ingestion.api.common import EndOfStream, PipelineContext, RecordEnvelope
@@ -493,6 +495,10 @@ class GrafanaSchemaTransformer(Transformer):
                 or pipeline.source.type != "grafana" or ctx.preview_mode
                 or (pipeline.source.config or {}).get("stateful_ingestion") is not None):
             raise CatalogBindingError("grafana_schema_preparation_pipeline_required")
+        return cls._from_config(config_dict, ctx)
+
+    @classmethod
+    def _from_config(cls, config_dict: dict, ctx: PipelineContext) -> Self:
         if (not isinstance(config_dict, dict)
                 or set(config_dict) != {"dashboard", "scopes_by_datasource", "env"}
                 or not isinstance(config_dict["dashboard"], dict)
@@ -544,3 +550,82 @@ class GrafanaSchemaTransformer(Transformer):
             # a partial batch or report a successful pipeline after validation fails.
             reason = str(error) if isinstance(error, CatalogBindingError) else "grafana_schema_batch_rejected"
             raise RuntimeError(reason) from None
+
+
+class GrafanaIngestionSchemaTransformer(GrafanaSchemaTransformer):
+    """Operator-installed native Source seam; not the Host preparation entrypoint.
+
+    The reviewed Source recipe pins the dashboard, datasource scope and expected
+    versions of its query schema/Chart references. The full batch is validated
+    before emitting anything. The official synchronous sink owns publication and
+    passes the public MCP If-Version-Match headers to DataHub. Conflicts fail the
+    run; versions are never refreshed automatically to make a retry succeed.
+    This is per-aspect CAS, not a cross-aspect transaction or approval service.
+    """
+
+    expected_versions: dict[tuple[str, str], str]
+
+    @classmethod
+    def create(cls, config_dict: dict, ctx: PipelineContext) -> "GrafanaIngestionSchemaTransformer":
+        pipeline = ctx.pipeline_config
+        if (pipeline is None or pipeline.source.type != "grafana" or pipeline.sink is None
+                or pipeline.sink.type != "datahub-rest" or ctx.preview_mode
+                or (pipeline.source.config or {}).get("stateful_ingestion") is not None
+                or (pipeline.sink.config or {}).get("mode") != "SYNC"
+                or (pipeline.sink.config or {}).get("retry_max_times") != 0):
+            raise CatalogBindingError("grafana_schema_native_sync_pipeline_required")
+        if not isinstance(config_dict, dict) or "expected_versions" not in config_dict:
+            raise CatalogBindingError("grafana_schema_expected_versions_required")
+        config = dict(config_dict)
+        versions = config.pop("expected_versions")
+        transformer = cls._from_config(config, ctx)
+        uid = transformer.dashboard.get("uid")
+        title = transformer.dashboard.get("title")
+        # The official connector filters by TITLE, not UID. Require the exact
+        # escaped title and separately bind emitted entity identities below.
+        if (not isinstance(uid, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", uid)
+                or not isinstance(title, str) or not title
+                or (pipeline.source.config or {}).get("dashboard_pattern", {}).get("allow") != [f"^{re.escape(title)}$"]):
+            raise CatalogBindingError("grafana_schema_exact_dashboard_required")
+        expected = set()
+        for panel in transformer.dashboard.get("panels", []):
+            panel_id = panel.get("id")
+            datasource = panel.get("datasource", {}).get("uid")
+            if type(panel_id) is not int or panel_id < 1 or datasource not in transformer.scopes:
+                raise CatalogBindingError("grafana_schema_unsupported_panel")
+            expected.add((str(DatasetUrn(platform="grafana", name=f"mssql.{datasource}.{uid}.{panel_id}", env=transformer.env)), "schemaMetadata"))
+            expected.add((make_chart_urn("grafana", f"{uid}.{panel_id}"), "inputFields"))
+        if (not expected or not isinstance(versions, dict)
+                or any(not isinstance(aspects, dict) for aspects in versions.values())):
+            raise CatalogBindingError("grafana_schema_expected_versions_required")
+        supplied = {(urn, aspect): value for urn, aspects in versions.items() for aspect, value in aspects.items()}
+        if (set(supplied) != expected or any(not isinstance(v, str) or not re.fullmatch(r"[1-9][0-9]*", v) for v in supplied.values())):
+            raise CatalogBindingError("grafana_schema_expected_versions_mismatch")
+        transformer.expected_versions = supplied
+        return transformer
+
+    def transform(self, record_envelopes: Iterable[RecordEnvelope]) -> Iterable[RecordEnvelope]:
+        # Materialize the already-bounded parent batch before adding preconditions,
+        # so a missing/invalid target cannot partially reach the native sink.
+        output = list(super().transform(record_envelopes))
+        if not output:
+            return
+        found = set()
+        allowed_urns = {urn for urn, _ in self.expected_versions}
+        dashboard_urn = make_dashboard_urn("grafana", self.dashboard["uid"])
+        for envelope in output:
+            record = envelope.record
+            if isinstance(record, EndOfStream):
+                continue
+            if ((record.entityType in {"dataset", "chart"} and record.entityUrn not in allowed_urns)
+                    or (record.entityType == "dashboard" and record.entityUrn != dashboard_urn)):
+                raise RuntimeError("grafana_schema_native_entity_out_of_scope")
+            key = (record.entityUrn, record.aspectName)
+            if key in self.expected_versions:
+                if record.headers and "If-Version-Match" in record.headers:
+                    raise RuntimeError("grafana_schema_unexpected_version_header")
+                record.headers = {**(record.headers or {}), "If-Version-Match": self.expected_versions[key]}
+                found.add(key)
+        if found != set(self.expected_versions):
+            raise RuntimeError("grafana_schema_conditional_targets_missing")
+        yield from output

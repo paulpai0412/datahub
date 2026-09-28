@@ -21,6 +21,7 @@ import requests
 from datahub.emitter.mcp import MetadataChangeProposalWrapper
 from datahub.emitter.mce_builder import make_schema_field_urn
 from datahub.ingestion.run.pipeline import Pipeline
+from datahub.telemetry.telemetry import suppress_telemetry
 from datahub.metadata.urns import DatasetUrn
 from datahub.metadata.schema_classes import (
     ChartInfoClass, DashboardInfoClass, SchemaMetadataClass, UpstreamLineageClass,
@@ -76,6 +77,9 @@ def ingest_fixture(dashboard, *, catalog=None, requests_seen=None, catalog_reads
     Optional catalog maps exact URNs to recorded/synthetic SchemaMetadata JSON.
     It is never a SQL-parsing or lineage-answer fixture.
     """
+    # Other suites may import the SDK before our environment setting is read.
+    # Use its invocation-only API, never the persistent telemetry preference.
+    suppress_telemetry()
     dashboard = copy.deepcopy(dashboard)
 
     def request(_session, method, url, **kwargs):

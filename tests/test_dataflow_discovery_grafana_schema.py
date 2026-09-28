@@ -42,6 +42,18 @@ def pipeline_transformer(dashboard):
 
 
 class GrafanaSchemaAdapterTests(unittest.TestCase):
+    def test_fixture_suppresses_sdk_telemetry_even_when_sdk_was_imported_first(self):
+        from datahub.telemetry.telemetry import telemetry_instance
+        dashboard = template("dashboard.json")["dashboard"]
+        calls = []
+        with patch.object(telemetry_instance, "enabled", True), patch.object(telemetry_instance, "mp") as transport:
+            def inspect(records):
+                self.assertFalse(telemetry_instance.enabled)
+                return records
+            ingest_fixture(dashboard, catalog=catalog_fixture(), transform=inspect, requests_seen=calls)
+            transport.track.assert_not_called()
+        self.assertTrue(all(method == "GET" or url == "https://catalog.invalid/openapi/v3/entity/dataset/batchGet" for method, url in calls))
+
     def test_official_pipeline_transformer_corrects_before_file_sink(self):
         dashboard = template("dashboard.json")["dashboard"]
         observations, calls = [], []
