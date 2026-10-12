@@ -1,6 +1,16 @@
 import { createHash } from "node:crypto";
 import { nativeSemantic, SemanticError } from "./native-semantic.mjs";
 import {
+  applySemanticDomains,
+  catalogContract,
+  isCatalogSteward,
+} from "./semantic-catalog-contract.mjs";
+import {
+  compileCatalogPublication,
+  recompileCatalogPublication,
+  verifyCatalogPublicationContext,
+} from "./semantic-catalog-publication.mjs";
+import {
   canonicalPublicationJson as canonical,
   makePublicationReview,
 } from "./publication-review.mjs";
@@ -53,6 +63,8 @@ export async function compileSemanticPublication(
   context,
   timing = {},
 ) {
+  if (request.contract === catalogContract)
+    return compileCatalogPublication(request, context, timing);
   const policy = publicationPolicy(context, request.sourceUrn);
   if (!["preview", "preview_definition"].includes(request.action))
     fail("invalid_semantic_proposal");
@@ -152,7 +164,11 @@ export async function compileSemanticPublication(
         );
       }
       if (item.kind === "description") value.description = item.value;
-      if (item.kind === "domain") (value.domains ??= []).push(item.value);
+      if (item.kind === "domain")
+        Object.assign(
+          value,
+          applySemanticDomains(value, [...(value.domains ?? []), item.value]),
+        );
       if (item.kind === "tag") {
         const container = item.fieldPath ? (value.globalTags ??= {}) : value;
         (container.tags ??= []).push({ tag: item.value });
@@ -185,7 +201,9 @@ export async function compileSemanticPublication(
         });
     }
   }
-  const { asOf: _asOf, ...stablePreview } = preview;
+  // Delivery-only capability guidance must not invalidate existing review
+  // digests. Actual operator policy remains bound separately below.
+  const { asOf: _asOf, reviewPolicy: _reviewPolicy, ...stablePreview } = preview;
   const semanticContext = {
     actor: context.actor.urn,
     createdAt,
@@ -215,7 +233,11 @@ export async function compileSemanticPublication(
       !validateStewardChange(
         review,
         change,
-        JSON.parse(change.beforeValueJson),
+        change.urn === request.datasetUrn
+          ? snapshot[change.aspect]?.value
+          : change.urn === selectedField?.urn
+            ? fieldState?.[change.aspect]?.value
+            : null,
         context.actor.urn,
       )
     )
@@ -224,9 +246,16 @@ export async function compileSemanticPublication(
 }
 
 export async function recompileSemanticPublication(review, context) {
+  if (isCatalogSteward(review.analysisVersion))
+    return recompileCatalogPublication(review, context);
   if (review.analysisVersion !== stewardVersion)
     fail("semantic_compiler_mismatch");
-  const saved = JSON.parse(review.semanticContextJson);
+  let saved;
+  try {
+    saved = JSON.parse(review.semanticContextJson);
+  } catch {
+    fail("invalid_semantic_review");
+  }
   const fresh = await compileSemanticPublication(saved.request, context, {
     createdAt: saved.createdAt,
     expiresAt: review.expiresAt,
@@ -239,7 +268,14 @@ export async function recompileSemanticPublication(review, context) {
  * source/schema/reference context after writes and never call that trusted PASS.
  */
 export async function verifySemanticPublicationContext(review, context) {
-  const saved = JSON.parse(review.semanticContextJson);
+  if (isCatalogSteward(review.analysisVersion))
+    return verifyCatalogPublicationContext(review, context);
+  let saved;
+  try {
+    saved = JSON.parse(review.semanticContextJson);
+  } catch {
+    fail("invalid_semantic_review");
+  }
   if (hash(publicationPolicy(context, review.source)) !== saved.policySha256)
     fail("semantic_review_stale");
   const request = { ...saved.request };

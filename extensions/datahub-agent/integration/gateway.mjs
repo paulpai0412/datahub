@@ -13,6 +13,7 @@ import { SqlError } from "./native-sql.mjs";
 import { GrafanaError } from "./native-grafana.mjs";
 import { QueryError } from "./query-metadata.mjs";
 import { TaskRecordError } from "./task-records.mjs";
+import { MaintenanceInputRejection } from "./semantic-maintenance-plan.mjs";
 import manifest from "../pi-web/app/manifest.ts";
 import {
   createWebSessionToken,
@@ -295,6 +296,8 @@ export async function createAgentGateway({
   taskRequest,
   discoveryRequest,
   semanticRequest,
+  sourceSettingsRequest,
+  connectionSettingsRequest,
   catalogRequest,
   sqlRequest,
   sqlResultRequest,
@@ -336,6 +339,8 @@ export async function createAgentGateway({
     ["/agent/tasks", { handler: taskRequest, name: "tasks" }],
     ["/agent/discovery", { handler: discoveryRequest, name: "discovery" }],
     ["/agent/semantic", { handler: semanticRequest, name: "semantic" }],
+    ["/agent/source-settings", { handler: sourceSettingsRequest, name: "source_settings" }],
+    ["/agent/connection-settings", { handler: connectionSettingsRequest, name: "query_settings" }],
     ["/agent/catalog", { handler: catalogRequest, name: "catalog" }],
     ["/agent/sql", { handler: sqlRequest, name: "sql" }],
     ["/agent/sql-result", { handler: sqlResultRequest, name: "sql" }],
@@ -495,7 +500,9 @@ export async function createAgentGateway({
             : operations.has(request.url)
               ? ["grantId", "revokeToken", "request"]
               : ["grantId", "revokeToken"],
-          request.url === "/agent/discovery"
+          request.url === "/agent/source-settings"
+            ? 524288 // Exact Dataset URNs plus escaped admin request; no recipe or credentials.
+            : request.url === "/agent/discovery"
             ? 131072 // Escaped source capsule + parent proof; legacy intents stay 8KB in Discovery.
             : request.url === "/agent/sql"
               ? 65536
@@ -543,7 +550,7 @@ export async function createAgentGateway({
           };
           try {
             assertActive();
-            const result = await handler(input.request, {
+            const hostContext = {
               actor,
               cookieHeader: request.headers.cookie,
               assertActive,
@@ -556,8 +563,9 @@ export async function createAgentGateway({
                 : request.url === "/agent/semantic"
                   ? { getRuntime: () => runtimeForActor(actor) }
                   : {}),
-            });
-            assertActive();
+            };
+            const result = await handler(input.request, hostContext);
+            hostContext.assertActive();
             json(response, 200, result);
           } finally {
             if (interruptible) {
@@ -666,6 +674,9 @@ export async function createAgentGateway({
               : "service_unavailable",
         ...(error instanceof TaskRecordError && error.reconciliation
           ? { reconciliation: error.reconciliation }
+          : {}),
+        ...(error instanceof MaintenanceInputRejection && error.inputRejection
+          ? { inputRejection: error.inputRejection }
           : {}),
       });
     }

@@ -156,6 +156,12 @@ export function createMetadataQueryHost({
       context,
     );
     const binding = resolveQueryBinding(snapshots, bindings, context.actor);
+    const originalContext = context;
+    context = { ...originalContext, assertActive() {
+      originalContext.assertActive();
+      if (resolveQueryBinding(snapshots, bindings, originalContext.actor) !== binding)
+        rejectQuery("query_connection_changed", 409);
+    } };
     const compiled = await source.compile(
       input.plan,
       snapshots,
@@ -163,6 +169,8 @@ export function createMetadataQueryHost({
       context,
     );
     validateQueryChart(input.chart, compiled.columns);
+    if (resolveQueryBinding(snapshots, bindings, context.actor) !== binding)
+      rejectQuery("query_connection_changed", 409);
     context.assertActive();
     const busy = active.get(binding.id) ?? 0;
     if (busy >= 2 || results.size >= 64 || retainedBytes >= 32 * 1048576)
@@ -182,6 +190,8 @@ export function createMetadataQueryHost({
         readMetadata,
         context,
       );
+      if (resolveQueryBinding(latest, bindings, context.actor) !== binding)
+        rejectQuery("query_connection_changed", 409);
       if (hash(shape(latest)) !== hash(shape(snapshots)))
         rejectQuery("query_metadata_changed", 409);
       const bytes = Buffer.byteLength(JSON.stringify(result));
@@ -305,6 +315,7 @@ export function createMetadataQueryHost({
               },
               context,
             );
+            await checked(input.resultRef, context);
             context.assertActive();
             displays.set(displayRef, {
               entry: e,

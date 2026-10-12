@@ -9,7 +9,7 @@ export function semanticPublicationFixture() {
   Object.assign(f.policy, { semanticPublicationApproved: true, semanticAgentUrn: "urn:li:aiAgent:fixture-semantic", semanticAuditAudience: "EXISTING_TASK_RUN_ACL" });
   Object.assign(f.state.dataset.schemaMetadata.systemMetadata, { runId: executionUrn, pipelineName: sourceUrn });
   const journal = new Map();
-  const state = { now: 1790056000000, submissions: 0, targetWrites: 0, recordWrites: 0, pending: null, lossAfter: 0, beforeTarget: null, afterTarget: null, afterRecord: null };
+  const state = { now: 1790056000000, submissions: 0, targetWrites: 0, recordWrites: 0, pending: null, lossAfter: 0, beforeTarget: null, afterTarget: null, afterRecord: null, recordHistoryLimits: {} };
   const sessionId = "00000000-0000-4000-8000-000000000088";
   const baseFetch = f.context.fetchImpl;
   f.context.now = () => state.now;
@@ -42,7 +42,14 @@ export function semanticPublicationFixture() {
               aspectCreated: old?.systemMetadata.aspectCreated ?? { actor: actor.urn, time: state.now },
               aspectModified: { actor: actor.urn, time: state.now },
             } };
-            if (isRecord) { const versions = journal.get(key) ?? []; versions.push(value); journal.set(key, versions); state.recordWrites++; await state.afterRecord?.(aspect, value.value); }
+            if (isRecord) {
+              const versions = journal.get(key) ?? []; versions.push(value);
+              // Observed native default is finite, not the old fixture's unbounded history.
+              const limit = state.recordHistoryLimits[aspect] ?? 20;
+              assert(Number.isInteger(limit) && limit > 0 && limit <= 2147483647);
+              journal.set(key, versions.slice(-limit));
+              state.recordWrites++; await state.afterRecord?.(aspect, value.value);
+            }
             else { native[aspect] = value; state.targetWrites++; state.afterTarget?.(aspect, value.value); }
             ack[aspect] = value;
             if (isRecord && state.recordLossAt === state.recordWrites) throw new Error("fixture lost record ACK");
@@ -59,7 +66,7 @@ export function semanticPublicationFixture() {
         for (const [aspect, headers] of Object.entries(aspects)) {
           const versions = journal.get(`${urn}/${aspect}`);
           const index = headers.headers?.["If-Version-Match"];
-          const value = index ? versions?.[Number(index) - 1] : versions?.at(-1);
+          const value = index ? versions?.find((entry) => entry.systemMetadata.version === index) : versions?.at(-1);
           if (value) row[aspect] = value;
         }
         return row;

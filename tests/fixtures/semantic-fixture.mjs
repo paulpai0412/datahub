@@ -118,6 +118,8 @@ export function semanticFixture() {
       }
       assert.equal(options.method, "POST");
       assert.ok(url.pathname.endsWith("/batchGet"), "Only public read batchGet permitted");
+      if (url.pathname === "/openapi/v3/entity/schemafield/batchGet")
+        return Response.json(body.map(({ urn }) => ({ urn, ...state.fields[urn] })));
       assert.equal(body.length, 1);
       if (url.pathname === "/openapi/v3/entity/datahubingestionsource/batchGet") {
         assert.equal(body[0].urn, sourceUrn);
@@ -133,7 +135,6 @@ export function semanticFixture() {
         return Response.json([state.dataset]);
       }
       const urn = body[0].urn;
-      if (url.pathname === "/openapi/v3/entity/schemafield/batchGet") return Response.json([{ urn, ...state.fields[urn] }]);
       if (urn.includes(":ekop-semantic-") && !Object.hasOwn(state.definitions, urn)) return Response.json([]);
       assert.ok(Object.hasOwn(state.definitions, urn), "Fixture has no such definition");
       return Response.json([{ urn, ...state.definitions[urn] }]);

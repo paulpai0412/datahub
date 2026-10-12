@@ -3,7 +3,9 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { nativeSemantic } from "../extensions/datahub-agent/integration/native-semantic.mjs";
 import { ingestionPolicies } from "../extensions/datahub-agent/integration/ingestion-policy.mjs";
-import semanticExtension from "../extensions/datahub-agent/pi-web/lib/datahub-semantic-extension.ts";
+import { createRequire } from "node:module";
+const { createJiti } = createRequire(new URL("../extensions/datahub-agent/pi-web/package.json", import.meta.url))("jiti");
+const { default: semanticExtension } = await createJiti(import.meta.url).import("../extensions/datahub-agent/pi-web/lib/datahub-semantic-extension.ts");
 import { semanticFixture, sourceUrn, datasetUrn, requestId, actor, envelope } from "./fixtures/semantic-fixture.mjs";
 
 const candidate = (extra = {}) => ({ kind: "description", value: "Proposed order description", reason: "Based on the existing source description", evidenceIds: ["dataset:source-description"], ...extra });
@@ -177,7 +179,7 @@ test("malformed Catalog and oversized output are not truncated successful previe
     (s) => { s.dataset.datasetKey.systemMetadata.version = ""; },
     (s) => { s.dataset.datasetKey.systemMetadata.version = 1; },
     (s) => { s.dataset.schemaMetadata.systemMetadata.pipelineName = { excluded: "NOT_FOR_MODEL" }; },
-    (s) => { s.dataset.datasetProperties.value.description = "x".repeat(48000); },
+    (s) => { s.dataset.datasetProperties.value.description = "x".repeat(524288); },
   ]) {
     const f = semanticFixture(); mutate(f.state);
     await assert.rejects(f.run(), /semantic_(catalog_invalid|catalog_incomplete|response_too_large)/);
@@ -194,12 +196,12 @@ test("arbitrary action, endpoint, actor, fields and oversized intents rejected b
 
 test("actual Pi extension discovers Skill and reaches native Host without SDK/model/credentials", async () => {
   let tool, discover;
-  semanticExtension({ on(name, handler) { assert.equal(name, "resources_discover"); discover = handler; }, registerTool(value) { tool = value; } });
+  semanticExtension({ on(name, handler) { if (name === "resources_discover") discover = handler; }, appendEntry() {}, registerTool(value) { tool = value; } });
   const path = discover().skillPaths[0];
   assert.match(await readFile(path, "utf8"), /name: datahub-semantic/);
   assert.equal(tool.name, "datahub_semantic");
   const f = semanticFixture();
-  const ctx = { mode: "rpc", ui: { async input(title, body) {
+  const ctx = { mode: "rpc", sessionManager: { getSessionId: () => "00000000-0000-4000-8000-000000000123" }, ui: { async input(title, body) {
     assert.equal(title, "DataHub semantic request");
     return JSON.stringify(await nativeSemantic(body, f.context));
   } } };
@@ -207,10 +209,19 @@ test("actual Pi extension discovers Skill and reaches native Host without SDK/mo
   assert.equal(result.details.current.description, "Human maintained fixture definition");
   assert.deepEqual(JSON.parse(result.content[0].text), result.details);
   assert.deepEqual(JSON.parse(JSON.stringify(result)).details, result.details, "native tool details persist without a custom state store");
-  await assert.rejects(tool.execute("test", { action: "list_sources" }, undefined, undefined, { mode: "tui" }), /datahub_host_required/);
-  for (const response of [undefined, "{", JSON.stringify({ error: "server detail with secrets" }), JSON.stringify({ requestId: "other", publicationAuthorized: true })]) {
-    await assert.rejects(tool.execute("test", { action: "list_sources" }, undefined, undefined, { mode: "rpc", ui: { input: async () => response } }), /semantic_/);
+  await assert.rejects(tool.execute("test", { action: "list_sources" }, undefined, undefined, { mode: "tui", sessionManager: ctx.sessionManager }), /datahub_host_required/);
+  let aborts = 0;
+  for (const response of [undefined, "{", JSON.stringify({ requestId: "other", publicationAuthorized: true })]) {
+    const rejected = await tool.execute("test", { action: "list_sources" }, undefined, undefined,
+      { mode: "rpc", sessionManager: ctx.sessionManager, abort() { aborts++; }, ui: { notify() {}, input: async () => response } });
+    assert.match(rejected.details.error, /semantic_/);
+    assert.equal(rejected.details.retryAllowed, false);
+    assert.equal(rejected.details.reconciliation.requestId, rejected.details.requestId);
   }
+  assert.equal(aborts, 3);
+  await assert.rejects(tool.execute("test", { action: "list_sources" }, undefined, undefined,
+    { mode: "rpc", sessionManager: ctx.sessionManager, ui: { input: async () => JSON.stringify({ error: "server detail with secrets" }) } }),
+    { message: "semantic_request_rejected" });
   const abort = new AbortController(); abort.abort();
   await assert.rejects(tool.execute("test", { action: "list_sources" }, abort.signal, undefined, ctx), { name: "AbortError" });
 });

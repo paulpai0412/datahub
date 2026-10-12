@@ -252,7 +252,7 @@ test("RPC session startup treats only sessions with messages as continuing", asy
   assert.match(startupSource, /const initial = hasExistingMessages/);
   assert.match(
     startupSource,
-    /getLatestModelChange\(branch as unknown as SessionEntry\[\]\)/,
+    /getLatestModelChange\(branch as SessionEntry\[\]\)/,
   );
   assert.match(startupSource, /model: startupModel/);
   assert.doesNotMatch(startupSource, /const initial = sessionFile/);

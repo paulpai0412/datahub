@@ -1,19 +1,42 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { semanticCatalogFixture, catalogEvidence } from "./fixtures/semantic-catalog-fixture.mjs";
+import { nativeSemantic } from "../extensions/datahub-agent/integration/native-semantic.mjs";
 import { runInNewContext } from "node:vm";
 import { createRequire } from "node:module";
 import { semanticFixture, semanticCheckpointFixture, datasetUrn } from "./fixtures/semantic-fixture.mjs";
 
 const require = createRequire(new URL("../extensions/datahub-agent/pi-web/package.json", import.meta.url));
-const ts = require("typescript");
+const { buildSync } = require("esbuild");
 const React = require("react");
 const { renderToStaticMarkup } = require("react-dom/server");
-const exports = {};
-runInNewContext(ts.transpileModule(readFileSync(new URL("../extensions/datahub-agent/pi-web/components/DataHubSemanticPreview.tsx", import.meta.url), "utf8"), {
-  compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022 },
-}).outputText, { exports, require, TextEncoder });
-const { isSemanticPreview, DataHubSemanticPreview } = exports;
+const module = { exports: {} };
+const compiled = buildSync({ entryPoints: [fileURLToPath(new URL("../extensions/datahub-agent/pi-web/components/DataHubSemanticPreview.tsx", import.meta.url))],
+  bundle: true, write: false, platform: "node", format: "cjs", packages: "external", jsx: "automatic" });
+runInNewContext(compiled.outputFiles[0].text, { module, require, TextEncoder });
+const { isSemanticPreview, DataHubSemanticPreview } = module.exports;
+
+test("Catalog cards render real new-contract previews, updates and vocabulary without fabricated membership or execution", async () => {
+  const f = semanticCatalogFixture();
+  for (const urn of Object.values(f.assets)) {
+    const value = await f.inspect(urn);
+    assert.equal(isSemanticPreview(value), true);
+    const html = renderToStaticMarkup(React.createElement(DataHubSemanticPreview, { preview: value }));
+    assert.match(html, /指定 Catalog 子集/); assert.match(html, /尚未核准／發布/);
+    assert.equal(isSemanticPreview({ ...value, scope: { ...value.scope, ingestionMembershipVerified: true } }), false);
+  }
+  const req = await f.request([{ kind: "description", operation: "set", value: "<script>window.exploited=true</script>", ...catalogEvidence }], f.assets.chart);
+  const preview = await nativeSemantic(JSON.stringify(req), f.context);
+  assert.equal(isSemanticPreview(preview), true);
+  const html = renderToStaticMarkup(React.createElement(DataHubSemanticPreview, { preview }));
+  assert.match(html, /Existing human description/); assert.match(html, /設定／替換所選值/); assert.match(html, /&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script|<button/);
+  const definition = await nativeSemantic(JSON.stringify(await f.definitionRequest({ kind: "tag", operation: "update", urn: "urn:li:tag:Reviewed", version: "1", description: "Updated tag" })), f.context);
+  assert.equal(isSemanticPreview(definition), true);
+  assert.match(renderToStaticMarkup(React.createElement(DataHubSemanticPreview, { preview: definition })), /更新同一既有定義/);
+  assert.equal(f.writes.targetWrites, 0);
+});
 
 test("real React component renders Host inventory and restored tool detail, with honest paging", async () => {
   const f = semanticFixture();
@@ -62,7 +85,7 @@ test("malformed, forged-publication, unscoped and inconsistent pages do not rece
     { publicationAuthorized: true }, { scope: { ...result.scope, completeSourceInventory: true } },
     { scope: { ...result.scope, datasetUrns: [] } }, { fields: [{ fieldPath: "x" }] },
     { nextOffset: 300 }, { totalFields: 0 }, { source: { name: {} } },
-    { snapshotDigest: "wrong" }, { note: "x".repeat(48000) },
+    { snapshotDigest: "wrong" }, { note: "x".repeat(524288) },
   ]) assert.equal(isSemanticPreview({ ...result, ...change }), false);
   assert.equal(isSemanticPreview(null), false);
   assert.equal(isSemanticPreview({ ...result, action: "preview", changes: [{ kind: "description" }] }), false);

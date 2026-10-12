@@ -101,7 +101,31 @@ def execute(compiled, config, connect_impl=connect):
                     connection.close()
 
 
+def test_connection(config, connect_impl=connect):
+    """Fixed admin-triggered connectivity probe. No user SQL or business rows."""
+    connection = cursor = None
+    try:
+        connection = connect_impl("mssql", config)
+        cursor = connection.cursor()
+        cursor.execute("SELECT 1")
+        require(cursor.fetchone()[0] == 1, "query_connection_test_failed")
+        return {"status": "CONNECTED", "selectPermissionsVerified": False}
+    finally:
+        try:
+            if cursor is not None:
+                cursor.close()
+        finally:
+            if connection is not None:
+                try:
+                    connection.rollback()
+                finally:
+                    connection.close()
+
+
 def run(request):
+    if isinstance(request, dict) and request.get("operation") == "test_connection":
+        exact(request, {"operation", "connection"})
+        return test_connection(request["connection"])
     exact(request, {"operation", "plan", "metadata", "binding"}, {"connection"})
     require(request["operation"] in {"compile", "execute"})
     compiled = compile_query(request["plan"], request["metadata"], request["binding"])
@@ -109,7 +133,11 @@ def run(request):
         require("connection" not in request)
         return compiled.wire()
     require("connection" in request, "query_connection_unavailable")
-    require(request["connection"].get("database") == request["binding"]["database"], "query_source_mismatch")
+    actual_database = request["connection"].get("database")
+    expected_database = request["binding"]["database"]
+    require(isinstance(actual_database, str) and
+            (actual_database.casefold() == expected_database.casefold() if compiled.dialect == "mssql"
+             else actual_database == expected_database), "query_source_mismatch")
     return execute(compiled, request["connection"])
 
 

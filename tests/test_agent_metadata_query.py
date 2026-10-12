@@ -41,6 +41,29 @@ PLAN = {"datasets": [{"urn": m["urn"], "alias": alias} for m, alias in zip(META,
 
 
 class CompilerTests(unittest.TestCase):
+    def test_connection_probe_fixed_select_rollback_and_sanitized_failure(self):
+        calls = []
+        cursor = SimpleNamespace(execute=lambda sql: calls.append(sql), fetchone=lambda: (1,),
+                                 close=lambda: calls.append('cursor.close'))
+        connection = SimpleNamespace(cursor=lambda: cursor, rollback=lambda: calls.append('rollback'),
+                                     close=lambda: calls.append('connection.close'))
+        result = runner.test_connection({}, lambda dialect, config: connection)
+        self.assertEqual(result, {'status': 'CONNECTED', 'selectPermissionsVerified': False})
+        self.assertEqual(calls, ['SELECT 1', 'cursor.close', 'rollback', 'connection.close'])
+        self.assertEqual(runner.public_error(RuntimeError('password=DO_NOT_LEAK')), 'query_execution_unconfirmed')
+        with self.assertRaises(QueryError):
+            runner.run({'operation': 'test_connection', 'connection': {}, 'sql': 'DROP TABLE test'})
+
+    def test_mssql_database_case_matches_metadata_without_changing_connection_name(self):
+        config = {'database': 'DEMO'}
+        with patch.object(runner, 'execute', return_value={'verified': True}) as run:
+            self.assertEqual(runner.run({'operation': 'execute', 'plan': PLAN, 'metadata': META,
+                                        'binding': BINDING, 'connection': config}), {'verified': True})
+            self.assertEqual(run.call_args.args[1]['database'], 'DEMO')
+        with self.assertRaises(QueryError):
+            runner.run({'operation': 'execute', 'plan': PLAN, 'metadata': META,
+                        'binding': BINDING, 'connection': {'database': 'OTHER'}})
+
     def test_composite_join_really_computes_not_fixed_report(self):
         compiled = compile_query(PLAN, META, BINDING)
         wire = compiled.wire()

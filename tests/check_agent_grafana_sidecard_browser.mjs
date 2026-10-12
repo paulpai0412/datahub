@@ -108,6 +108,11 @@ try {
                 res.end(JSON.stringify(result));
                 return;
             }
+            if (req.url === "/workspace-portal.js") {
+                res.setHeader("content-type", "text/javascript");
+                res.end(await readFile("extensions/datahub-agent/mfe/workspace-portal.js", "utf8"));
+                return;
+            }
             if (req.url === "/bridge.js") {
                 res.setHeader("content-type", "text/javascript");
                 res.end(bridge);

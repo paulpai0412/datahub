@@ -8,6 +8,23 @@
 
 詳見[整案進度盤點與任務移轉](docs/verification/datahub-progress-inventory-20260919.md)、[業務Goal TODO](docs/datahub-sales-datamart-todo.md)、[平台T01–T07](docs/datahub-agent-todo.md)。已驗歷史不代表本日live健康／過期token仍有效。
 
+## Agent SQL／Grafana UI（2026-10-02）
+
+已恢復現行 `/mfe/agent` 的 metadata 驅動唯讀 SQL／Grafana 接線。以 `datahub` 登入 DataHub、自己的 `admin` 登入 Grafana org2，Agent 工具選單選 `datahub-only`；真 UI 已完成 SalesDatamart 三表 JOIN → 原生長條圖＋同次結果表，數值對帳一致。原語義維護功能保留。後續已合併部署下列兩個設定頁，沒有代存新來源或連線。
+
+操作範例及驗證邊界見[接線恢復紀錄](docs/verification/datahub-agent-query-restoration-20261002.md)。本次驗收腳本提早 Stop，模型最後文字自然收尾未驗；沒有重跑成功 SQL。結果短效，歷史圖表重開不會自動重新查詢。
+
+### 設定 → 使用來源／資料庫連線
+
+兩個 UI 已一起部署。重新整理 Agent 後，開啟 **Settings／設定**：
+
+- **使用來源**：查看及管理Source綁定的語義metadata範圍。
+- **資料庫連線**：新增／修改／測試／停用SQL Server查詢連線；密碼在可信DataHub父頁面輸入，不回顯、不交模型。
+
+新增AdventureWorks查詢連線時，搜尋並選擇其已匯入Dataset，再填來源主機、TCP埠、資料庫與唯讀SQL帳號。測試按鈕只驗固定`SELECT 1`，不代表所有表的SELECT權限。Grafana沿用既有Host結果datasource，不需另建MSSQL datasource。
+
+詳見[操作說明](docs/design/datahub-agent-connection-settings.md)及[合併部署證據／未驗範圍](docs/verification/datahub-agent-connection-source-settings-20261002.md)。目前未代存AdventureWorks新連線、未執行其業務查詢或啟用AUTO。
+
 ## 部署與範圍
 
 - 固定 DataHub Core `v1.7.0.1`，官方原始碼以 `upstream/datahub` Git submodule 管理。
@@ -15,7 +32,7 @@
 - 使用官方預建容器；不是從原始碼重新編譯 Core。
 - `deploy/images.lock.yaml` 固定全部七個容器的 digest；CLI 固定 `1.7.0.9`。
 - 本機 UI：<http://localhost:9002>；GMS：<http://localhost:18080>。
-- 已透過插件／Host擴充接入核准AdventureWorks2019，並實際執行固定SalesDatamart ETL及Grafana唯讀SQL。尚無任意來源查詢Broker／通用受控SQL查詢，也未完成Agent固定ETL可信操作。
+- 已透過插件／Host擴充接入核准AdventureWorks2019，並實際執行固定SalesDatamart ETL及Grafana唯讀SQL。Agent metadata驅動受控查詢已接通既有SalesDatamart來源；不等於任意來源／自由SQL／跨來源查詢均已支援，也未完成Agent固定ETL可信操作。
 - Ingestion 預設匯入表／欄位／關係等 Metadata，不複製整庫業務資料。
 
 這是單機開發環境，不是正式環境，也尚未完成架構文件 G0 的全部插件能力驗收。
@@ -94,4 +111,4 @@ python3 tests/test_installation.py --live
 4. 是否允許讀 Query Store／V$SQL、是否允許 profiling／聚合 SQL。
 5. 允許的查詢負載、timeout、並行數與觀測時段。
 
-先跑 metadata-only 小範圍盤點，確認 URN、欄位、權限與 ingestion 報告後再擴大；SQL 驗證與使用者查詢執行分別設計授權，不因 Catalog 可見就授予來源 SELECT。
+先跑 metadata-only 小範圍盤點，確認 URN、欄位、權限與 ingestion 報告後再擴大。使用者查詢以當前可見 DataHub metadata 為產品授權，仍須配置受保護來源連線，並由來源 DB 限制實際 SELECT；不另建逐人 SELECT 名單或逐題審批。關係驗證、來源寫入及新連線配置不由 Catalog 可見性自動授權。

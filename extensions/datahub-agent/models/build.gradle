@@ -14,7 +14,7 @@ apply plugin: 'java-library'
 apply plugin: 'pegasus'
 
 group = 'com.ekop'
-version = '0.1.9'
+version = '0.1.10'
 // Keep released artifacts and generated classes intact; each model version gets
 // its own build tree, so an old jar cannot leak into the new registry ZIP.
 layout.buildDirectory = layout.projectDirectory.dir("build/${version}")

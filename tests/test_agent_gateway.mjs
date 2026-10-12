@@ -7,6 +7,10 @@ import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { isValidWebSessionToken } from "../extensions/datahub-agent/pi-web/lib/web-auth.ts";
 import { createAgentGateway } from "../extensions/datahub-agent/integration/gateway.mjs";
+import { sourceSettingsFixture } from "./fixtures/source-settings-fixture.mjs";
+import { connectionSettingsFixture } from "./fixtures/connection-settings-fixture.mjs";
+import { sourcePolicyContext } from "../extensions/datahub-agent/integration/source-settings.mjs";
+import { SemanticError } from "../extensions/datahub-agent/integration/native-semantic.mjs";
 import { TaskRecordError } from "../extensions/datahub-agent/integration/task-records.mjs";
 import { GrafanaError } from "../extensions/datahub-agent/integration/native-grafana.mjs";
 import {
@@ -79,6 +83,66 @@ async function stop(server) {
   server.closeAllConnections();
   await new Promise((resolve) => server.close(resolve));
 }
+
+test("connection settings reject iframe origin, wrong viewer, missing proof and ordinary users without starting runtime", async (t) => {
+  const f = await connectionSettingsFixture(); t.after(() => rm(f.dir, { recursive: true, force: true }));
+  let calls = 0;
+  const server = await createAgentGateway({ gatewayOrigin: "http://localhost:0", datahubOrigin: frontend,
+    mfeDirectory: fileURLToPath(new URL("../extensions/datahub-agent/mfe/dist/", import.meta.url)),
+    verifyIdentity: async (cookie) => { if (cookie === f.context.cookieHeader) return f.actor; if (cookie === "PLAY_SESSION=bob") return actors.bob; throw new GrantError(); },
+    runtimeForActor: async () => { throw new Error("runtime_must_not_launch"); },
+    connectionSettingsRequest: async (text, context) => { calls++; return f.host(text, context); },
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening"); t.after(() => stop(server));
+  const port = server.address().port, headers = { origin: frontend, cookie: f.context.cookieHeader };
+  const launch = (await call(port, "/agent/bootstrap", { method: "POST", headers, data: {} })).data;
+  const data = { grantId: launch.grantId, revokeToken: launch.revokeToken, request: JSON.stringify({ action: "list" }) };
+  for (const bad of [{ origin: frontend }, { ...headers, cookie: "PLAY_SESSION=bob" }, { ...headers, origin: new URL(launch.launchUrl).origin }])
+    assert.notEqual((await call(port, "/agent/connection-settings", { method: "POST", headers: bad, data })).status, 200);
+  assert.notEqual((await call(port, "/agent/connection-settings", { method: "POST", headers, data: { ...data, revokeToken: "wrong" } })).status, 200);
+  assert.equal(calls, 0);
+  const good = await call(port, "/agent/connection-settings", { method: "POST", headers, data });
+  assert.equal(good.status, 200); assert.equal(good.headers["cache-control"], "no-store");
+  f.setAdmin(false); assert.equal((await call(port, "/agent/connection-settings", { method: "POST", headers, data })).status, 403);
+});
+
+test("source settings use current parent identity/proof and native admin without launching runtime; reply boundary rechecks revoked source grants", async (t) => {
+  const f = await sourceSettingsFixture(); t.after(() => rm(f.dir, { recursive: true, force: true }));
+  let calls = 0, runtimes = 0; const boundaryErrors = [];
+  const server = await createAgentGateway({ gatewayOrigin: "http://localhost:0", datahubOrigin: frontend,
+    mfeDirectory: fileURLToPath(new URL("../extensions/datahub-agent/mfe/dist/", import.meta.url)),
+    verifyIdentity: async (cookie) => { if (cookie === f.context.cookieHeader) return f.actor; if (cookie === "PLAY_SESSION=bob") return actors.bob; throw new GrantError(); },
+    runtimeForActor: async () => { runtimes++; throw new Error("runtime_must_not_launch"); },
+    sourceSettingsRequest: async (text, context) => { calls++; try { return await f.call(JSON.parse(text), context); }
+      catch (error) { boundaryErrors.push({ message: error.message, semantic: error instanceof SemanticError }); throw error; } },
+    semanticRequest: async (_text, context) => {
+      const bound = sourcePolicyContext(context, f.applied); context.assertActive = bound.assertActive;
+      bound.assertActive(); f.applied.set(f.actor.key, []);
+      return { sensitive: "REVOKED_SOURCE_MUST_NOT_ESCAPE" };
+    },
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening"); t.after(() => stop(server));
+  const port = server.address().port, headers = { origin: frontend, cookie: f.context.cookieHeader };
+  const launch = (await call(port, "/agent/bootstrap", { method: "POST", headers, data: {} })).data;
+  const data = { grantId: launch.grantId, revokeToken: launch.revokeToken, request: JSON.stringify({ action: "list" }) };
+  for (const bad of [{ origin: frontend }, { ...headers, cookie: "PLAY_SESSION=bob" }, { ...headers, origin: new URL(launch.launchUrl).origin }]) {
+    assert.notEqual((await call(port, "/agent/source-settings", { method: "POST", headers: bad, data })).status, 200);
+  }
+  assert.notEqual((await call(port, "/agent/source-settings", { method: "POST", headers, data: { ...data, revokeToken: "wrong" } })).status, 200);
+  assert.equal(calls, 0);
+  const list = await call(port, "/agent/source-settings", { method: "POST", headers, data });
+  assert.equal(list.status, 200); assert.equal(list.headers["cache-control"], "no-store"); assert.equal(list.data.sources.length, 2);
+  f.setPrivileges(false);
+  const adminDenied = await call(port, "/agent/source-settings", { method: "POST", headers, data });
+  assert.equal(adminDenied.status, 403, JSON.stringify({ response: adminDenied.data, boundaryErrors }));
+  f.setPrivileges(true);
+  const inspected = await f.call({ action: "inspect", sourceUrn: f.urn });
+  const request = { action: "preview", sourceUrn: f.urn, sourceVersion: inspected.source.version, revision: inspected.revision, enabled: true, datasetUrns: f.datasets };
+  const plan = await f.call(request); await f.call({ ...request, action: "save", planDigest: plan.planDigest });
+  const revoked = await call(port, "/agent/semantic", { method: "POST", headers, data: { ...data, request: "synthetic-read-revoked-at-return" } });
+  assert.equal(revoked.status, 403); assert.equal(revoked.data.error, "source_settings_access_changed");
+  assert.equal(revoked.text.includes("REVOKED_SOURCE_MUST_NOT_ESCAPE"), false); assert.equal(runtimes, 0);
+});
 
 test("gateway real HTTP boundary with synthetic identity and runtime", async (t) => {
   const received = [];

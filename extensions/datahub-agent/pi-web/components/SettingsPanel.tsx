@@ -35,6 +35,8 @@ import { McpConfig } from "./McpConfig";
 import { SkillsConfig } from "./SkillsConfig";
 import { AgentsConfig } from "./AgentsConfig";
 import { PluginsConfig } from "./PluginsConfig";
+import { DataHubSourceSettings } from "./DataHubSourceSettings";
+import { DataHubConnectionSettings } from "./DataHubConnectionSettings";
 import { ConfigButton, ConfigSwitch } from "./SettingsUi";
 
 interface Props {
@@ -75,6 +77,13 @@ export function SettingsSectionIcon({
         <path d="M20 7h-9M14 17H5" />
         <circle cx="7" cy="7" r="3" />
         <circle cx="17" cy="17" r="3" />
+      </svg>
+    );
+  if (section === "sources" || section === "connections")
+    return (
+      <svg {...common}>
+        <ellipse cx="12" cy="5" rx="8" ry="3" />
+        <path d="M4 5v14c0 4 16 4 16 0V5M4 12c0 4 16 4 16 0" />
       </svg>
     );
   if (section === "models")
@@ -461,7 +470,8 @@ export function SettingsPanel({
 }: Props) {
   const { t } = useI18n();
   const dialogRef = useRef<HTMLDivElement>(null);
-  const [section, setSection] = useState<SettingsSection>(initialSection);
+  const supportedInitialSection = (initialSection === "sources" || initialSection === "connections") && !DATAHUB_EMBED ? "general" : initialSection;
+  const [section, setSection] = useState<SettingsSection>(supportedInitialSection);
   const [mountedSections, setMountedSections] = useState<
     ReadonlySet<SettingsSection>
   >(() => new Set([section]));
@@ -472,13 +482,17 @@ export function SettingsPanel({
   }[] = [
     { id: "general", label: t("settings.general"), requiresProject: false },
     { id: "models", label: t("common.models"), requiresProject: false },
+    ...(DATAHUB_EMBED ? [
+      { id: "sources" as const, label: t("settings.sources"), requiresProject: false },
+      { id: "connections" as const, label: "資料庫連線", requiresProject: false },
+    ] : []),
     { id: "mcp", label: "MCP", requiresProject: false },
     { id: "skills", label: t("common.skills"), requiresProject: true },
     { id: "agents", label: t("common.agents"), requiresProject: true },
     { id: "plugins", label: t("common.plugins"), requiresProject: true },
   ];
 
-  useEffect(() => setLastSettingsSection(initialSection), [initialSection]);
+  useEffect(() => setLastSettingsSection(supportedInitialSection), [supportedInitialSection]);
 
   useLayoutEffect(() => {
     const opener = document.activeElement;
@@ -605,6 +619,8 @@ export function SettingsPanel({
             />,
           )}
           {sectionHost("models", <ModelsConfig embedded onClose={onClose} />)}
+          {DATAHUB_EMBED && sectionHost("sources", <DataHubSourceSettings active={section === "sources"} />)}
+          {DATAHUB_EMBED && sectionHost("connections", <DataHubConnectionSettings active={section === "connections"} />)}
           {sectionHost(
             "mcp",
             <McpConfig sessionId={sessionId} onReloaded={onSessionReloaded} />,

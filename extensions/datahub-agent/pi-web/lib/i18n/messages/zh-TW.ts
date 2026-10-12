@@ -14,6 +14,7 @@ export const zhTWLocale: LocalePlugin = {
     "common.settings": "設定",
     "settings.title": "設定",
     "settings.general": "一般",
+    "settings.sources": "使用來源",
     "settings.generalDescription": "選擇 Pi Web 的外觀與介面語言。",
     "settings.appearance": "外觀",
     "settings.appearanceDescription":
@@ -389,6 +390,8 @@ export const zhTWLocale: LocalePlugin = {
     "chat.chatOnly": "僅聊天",
     "chat.datahubOnly": "僅 DataHub",
     "chat.datahubOnlyDescription": "僅 Catalog、受控 SQL 與 Grafana 意圖工具",
+    "chat.semanticGovernance": "語義治理",
+    "chat.semanticGovernanceDescription": "僅 Catalog 與語義提案；仍須真人核准",
     "chat.readOnlyTools": "{count} 個只讀內建工具",
     "chat.builtInTools": "{count} 個內建工具",
     "chat.allBuiltInTools": "全部內建工具",

@@ -388,6 +388,24 @@ test("renders the DataHub-only preset explicitly", () => {
   assert.match(html, />DataHub only<\/span>/);
 });
 
+test("renders the semantic governance preset explicitly", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(
+      I18nProvider,
+      null,
+      React.createElement(ChatInput, {
+        onSend() {},
+        onAbort() {},
+        onToolPresetChange() {},
+        isStreaming: false,
+        toolPreset: "semantic-governance",
+      }),
+    ),
+  );
+  assert.match(html, /title="Change tool preset: Semantic governance"/);
+  assert.match(html, />Semantic governance<\/span>/);
+});
+
 test("renders the empty tool preset as Chat only", () => {
   const html = renderToStaticMarkup(
     React.createElement(

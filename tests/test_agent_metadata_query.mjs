@@ -11,6 +11,7 @@ import {
 } from "../extensions/datahub-agent/integration/query-metadata.mjs";
 import {
   queryBindings,
+  applyQueryBindings,
   createQuerySource,
   resolveQueryBinding,
   runQueryChild,
@@ -42,8 +43,9 @@ function harness(options = {}) {
     if (!visible) throw new QueryError("query_metadata_denied", 403);
     return { snapshots: structuredClone(metadata), visible: async () => true };
   };
+  const bindings = queryBindings([binding]);
   const host = createMetadataQueryHost({
-    bindings: queryBindings([binding]),
+    bindings,
     readMetadata,
     source: {
       ...source,
@@ -84,6 +86,7 @@ function harness(options = {}) {
   });
   return {
     host,
+    bindings,
     counts: () => ({ sourceCalls, writes }),
     revoke: () => {
       visible = false;
@@ -113,6 +116,24 @@ const open = (displayRef) =>
     displayRef,
     requestId: randomUUID(),
   });
+
+test("connection settings changes revoke results and in-flight execution while unrelated changes preserve reads", async () => {
+  const h = harness(), input = request(), receipt = await h.host.execute(input, context);
+  const read = () => h.host.readResult(JSON.stringify({ action: "read_result", resultRef: receipt.resultRef }), context);
+  applyQueryBindings(h.bindings, [binding, { ...binding, id: "other-source", database: "other" }]);
+  assert.equal((await read()).rows.length, 2);
+  applyQueryBindings(h.bindings, [{ ...binding, connectionPath: "/protected/rotated" }]);
+  await assert.rejects(read(), /metadata_changed/);
+  await assert.rejects(h.host.execute(input, context), /metadata_changed/);
+  let changed;
+  changed = harness({ execute: async (_p, _m, _b, ctx) => {
+    applyQueryBindings(changed.bindings, [{ ...binding, enabled: false }]);
+    ctx.assertActive();
+    throw new Error("must not execute after disabling");
+  } });
+  await assert.rejects(changed.host.execute(request(), context), /connection_unavailable|connection_changed/);
+  assert.equal(changed.counts().writes, 0);
+});
 
 // This calls the real Python compiler and Host chain, but synthetic DB/Grafana
 // callbacks. It is deliberately not labelled a live SQL/Grafana acceptance.

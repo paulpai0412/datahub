@@ -1,3 +1,7 @@
+/* Match the workspace body, not the entire mobile viewport (toolbar excluded). */
+.workspace:global(#file-panel) {
+  height: 100%;
+}
 .workspace:global(#file-panel) > :not(.slot) {
   display: none !important;
 }

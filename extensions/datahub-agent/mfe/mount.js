@@ -4,6 +4,8 @@ import { installCatalogBridge } from "./catalog.js";
 import { installSqlBridge } from "./sql.js";
 import { installGrafanaBridge } from "./grafana.js";
 import { installSemanticBridge } from "./semantic.js";
+import { installSourceSettingsBridge } from "./source-settings.js";
+import { installConnectionSettingsBridge } from "./connection-settings.js";
 import { installRegistryView } from "./registry.js";
 import { installTaskDecisionBridge } from "./task-decision.js";
 
@@ -22,14 +24,14 @@ export function mount(container) {
   const status = document.createElement("p");
   status.setAttribute("role", "status");
   status.textContent = "Opening your isolated Agent workspace…";
-  const frame = document.createElement("iframe");
-  frame.title = "DataHub Agent";
-  frame.setAttribute(
-    "sandbox",
-    "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals",
-  );
-  frame.style.cssText =
-    "display:block;width:100%;height:100%;min-height:min(560px,100dvh);border:0;background:transparent";
+  let frame;
+  function createFrame() {
+    const next = document.createElement("iframe");
+    next.title = "DataHub Agent";
+    next.setAttribute("sandbox", "allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads allow-modals");
+    next.style.cssText = "display:block;width:100%;height:100%;min-height:min(560px,100dvh);border:0;background:transparent";
+    return next;
+  }
   const previousHeight = container.style.height;
   container.style.height = "100%";
   container.append(status);
@@ -42,11 +44,20 @@ export function mount(container) {
   let stopSql;
   let stopGrafana;
   let stopSemantic;
+  let stopSourceSettings;
+  let stopConnectionSettings;
   let stopRegistry;
   let stopDecisions;
   let mounted = false;
   let renewing = false;
-  function post(path, data, keepalive = false, requestSignal = abort.signal) {
+  let connecting = false;
+  let connectionAbort = new AbortController();
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "重新連線 Agent";
+  retry.style.cssText = "min-height:44px;max-width:100%;align-self:flex-start;padding:8px 12px;font:inherit;cursor:pointer";
+  retry.onclick = () => openConnection();
+  function post(path, data, keepalive = false, requestSignal = abort.signal, connectionSignal = connectionAbort.signal) {
     return fetch(new URL(path, gateway), {
       method: "POST",
       credentials: "include",
@@ -58,6 +69,7 @@ export function mount(container) {
         ? undefined
         : AbortSignal.any([
             abort.signal,
+            connectionSignal,
             requestSignal,
             AbortSignal.timeout(
               path === "/agent/tasks"
@@ -72,6 +84,8 @@ export function mount(container) {
                             "/agent/ingestion",
                             "/agent/discovery",
                             "/agent/semantic",
+                            "/agent/source-settings",
+                            "/agent/connection-settings",
                             "/agent/catalog",
                           ].includes(path)
                         ? 45000
@@ -80,26 +94,71 @@ export function mount(container) {
           ]),
     });
   }
-  function failed() {
+  function stopConnection() {
+    connectionAbort.abort();
     stopGrafana?.();
     stopIngestion?.();
     stopDiscovery?.();
     stopCatalog?.();
     stopSql?.();
     stopSemantic?.();
+    stopSourceSettings?.();
+    stopConnectionSettings?.();
     stopDecisions?.();
     stopRegistry?.();
+    stopGrafana = stopIngestion = stopDiscovery = stopCatalog = stopSql = stopSemantic =
+      stopSourceSettings = stopConnectionSettings = stopDecisions = stopRegistry = undefined;
     clearInterval(heartbeat);
-    if (abort.signal.aborted) return;
-    frame.remove();
-    status.textContent =
-      "Agent could not open. Check your DataHub login and retry from the Agent menu.";
-    if (mounted) container.append(status);
+    heartbeat = undefined;
+    frame?.remove();
     mounted = false;
   }
+  function releaseGrant() {
+    if (grantId) void post("/agent/revoke", { grantId, revokeToken }, true).catch(() => {});
+    grantId = revokeToken = undefined;
+  }
+  function failed(reconnect = false) {
+    stopConnection();
+    releaseGrant();
+    if (abort.signal.aborted) return;
+    status.remove();
+    status.textContent = "Agent could not open. Check your DataHub login and retry from the Agent menu.";
+    container.append(status);
+    // One fresh authenticated bootstrap, not a heartbeat/tool/model replay.
+    // A failed bootstrap stops here and leaves an explicit user retry control.
+    if (reconnect) openConnection();
+    else { retry.disabled = false; container.append(retry); }
+  }
+  async function renew() {
+    if (renewing || connecting || !mounted || abort.signal.aborted) return;
+    const attempt = connectionAbort;
+    renewing = true;
+    try {
+      const response = await post("/agent/heartbeat", { grantId, revokeToken }, false, attempt.signal);
+      if (attempt !== connectionAbort || attempt.signal.aborted) return;
+      if (!response.ok) failed(true);
+    } catch {
+      if (attempt === connectionAbort && !attempt.signal.aborted) failed(true);
+    } finally { renewing = false; }
+  }
+  const wake = () => { if (document.visibilityState !== "hidden") void renew(); };
+  document.addEventListener("visibilitychange", wake);
+  window.addEventListener("focus", wake);
+  window.addEventListener("online", wake);
 
   // The gateway verifies the DataHub session server-side. No actor supplied by JS.
-  post("/agent/bootstrap", {})
+  function openConnection() {
+    if (connecting || abort.signal.aborted) return;
+    connecting = true;
+    retry.remove();
+    retry.disabled = true;
+    status.textContent = "正在連線 Agent 工作區…";
+    connectionAbort = new AbortController();
+    const attempt = connectionAbort;
+    // A new WindowProxy fences queued messages from the retired document,
+    // even when the new authenticated actor has the same iframe origin.
+    frame = createFrame();
+    return post("/agent/bootstrap", {}, false, attempt.signal)
     .then(async (response) => {
       if (!response.ok) throw new Error("bootstrap_failed");
       const {
@@ -132,9 +191,13 @@ export function mount(container) {
       ) {
         throw new Error("invalid_bootstrap_target");
       }
-      if (abort.signal.aborted) return;
+      if (abort.signal.aborted || attempt.signal.aborted) return;
       grantId = issuedId;
       revokeToken = issuedProof;
+      // Bridges retain this exact grant and cancellation epoch. A late old
+      // callback cannot acquire fresh authority after workspace reconnection.
+      const activePost = (path, data, keepalive = false, signal = attempt.signal) =>
+        post(path, { ...data, grantId: issuedId, revokeToken: issuedProof }, keepalive, signal, attempt.signal);
       frame.setAttribute(
         "allow",
         `clipboard-read ${launch.origin}; clipboard-write ${launch.origin}`,
@@ -144,7 +207,7 @@ export function mount(container) {
       container.append(frame);
       stopRegistry = installRegistryView(container, frame);
       const sendTask = async (request, signal) => {
-        const response = await post(
+        const response = await activePost(
           "/agent/tasks",
           { grantId, revokeToken, request: JSON.stringify(request) },
           false,
@@ -167,7 +230,7 @@ export function mount(container) {
         frame,
         origin: launch.origin,
         send: async (request, signal) => {
-          const response = await post(
+          const response = await activePost(
             "/agent/ingestion",
             { grantId, revokeToken, request: JSON.stringify(request) },
             false,
@@ -181,7 +244,7 @@ export function mount(container) {
         frame,
         origin: launch.origin,
         send: async (request, signal) => {
-          const response = await post(
+          const response = await activePost(
             "/agent/catalog",
             { grantId, revokeToken, request: JSON.stringify(request) },
             false,
@@ -210,7 +273,7 @@ export function mount(container) {
           origin: launch.origin,
           grafanaOrigin: approved.origin,
           send: async (request, signal) => {
-            const response = await post(
+            const response = await activePost(
               "/agent/grafana",
               { grantId, revokeToken, request: JSON.stringify(request) },
               false,
@@ -225,7 +288,7 @@ export function mount(container) {
         frame,
         origin: launch.origin,
         execute: async (request, signal) => {
-          const response = await post(
+          const response = await activePost(
             "/agent/sql",
             { grantId, revokeToken, request: JSON.stringify(request) },
             false,
@@ -234,7 +297,7 @@ export function mount(container) {
           return response.json();
         },
         readResult: async (request, signal) => {
-          const response = await post(
+          const response = await activePost(
             "/agent/sql-result",
             { grantId, revokeToken, request: JSON.stringify(request) },
             false,
@@ -247,7 +310,7 @@ export function mount(container) {
         frame,
         origin: launch.origin,
         send: async (request, signal) => {
-          const response = await post(
+          const response = await activePost(
             "/agent/discovery",
             { grantId, revokeToken, request: JSON.stringify(request) },
             false,
@@ -262,7 +325,7 @@ export function mount(container) {
         frame,
         origin: launch.origin,
         send: async (request, signal) => {
-          const response = await post(
+          const response = await activePost(
             "/agent/semantic",
             { grantId, revokeToken, request: JSON.stringify(request) },
             false,
@@ -271,43 +334,37 @@ export function mount(container) {
           return response.json(); // Host returns bounded error codes, never upstream bodies.
         },
       });
-      heartbeat = setInterval(async () => {
-        if (renewing) return;
-        renewing = true;
-        try {
-          const response = await post("/agent/heartbeat", {
-            grantId,
-            revokeToken,
-          });
-          if (!response.ok) failed();
-        } catch {
-          failed();
-        } finally {
-          renewing = false;
-        }
-      }, 20000);
+      stopSourceSettings = installSourceSettingsBridge({
+        container, frame, origin: launch.origin,
+        send: async (request, signal) => {
+          const response = await activePost("/agent/source-settings",
+            { grantId, revokeToken, request: JSON.stringify(request) }, false, signal);
+          return response.json();
+        },
+      });
+      stopConnectionSettings = installConnectionSettingsBridge({
+        container, frame, origin: launch.origin,
+        send: async (request, signal) => {
+          const response = await activePost("/agent/connection-settings",
+            { grantId, revokeToken, request: JSON.stringify(request) }, false, signal);
+          return response.json();
+        },
+      });
+      heartbeat = setInterval(() => void renew(), 20000);
     })
-    .catch(failed);
+    .catch(() => failed())
+    .finally(() => { connecting = false; });
+  }
+  void openConnection();
   return () => {
-    stopGrafana?.();
-    stopIngestion?.();
-    stopDiscovery?.();
-    stopCatalog?.();
-    stopSql?.();
-    stopSemantic?.();
-    stopDecisions?.();
-    stopRegistry?.();
-    clearInterval(heartbeat);
     abort.abort();
-    if (grantId) {
-      void post("/agent/revoke", { grantId, revokeToken }, true).catch(
-        () => {},
-      );
-      grantId = undefined;
-      revokeToken = undefined;
-    }
-    frame.remove();
+    stopConnection();
+    releaseGrant();
+    document.removeEventListener("visibilitychange", wake);
+    window.removeEventListener("focus", wake);
+    window.removeEventListener("online", wake);
     status.remove();
+    retry.remove();
     container.style.height = previousHeight;
   };
 }

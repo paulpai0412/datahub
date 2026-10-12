@@ -1,17 +1,14 @@
 import { createHash } from "node:crypto";
-import { datahubSessionCookie } from "./datahub-identity.mjs";
+import { SemanticError, semanticNativeClient, semanticReviewPolicy } from "./semantic-native-client.mjs";
+export { SemanticError } from "./semantic-native-client.mjs";
+import { catalogContract, semanticCandidateLimit } from "./semantic-catalog-contract.mjs";
+import { nativeSemanticCatalog } from "./native-semantic-catalog.mjs";
 import { canonicalPublicationJson } from "./publication-review.mjs";
 import {
   semanticCheckpoint,
   CheckpointAdapterError,
 } from "./semantic-checkpoint.mjs";
 
-export class SemanticError extends Error {
-  constructor(code, status = 400) {
-    super(code);
-    this.status = status;
-  }
-}
 const fail = (code, status) => {
   throw new SemanticError(code, status);
 };
@@ -45,7 +42,7 @@ const referenceTypes = {
   term: ["glossaryTerm", "glossaryTermInfo", "GLOSSARY_TERM"],
   property: ["structuredProperty", "propertyDefinition", "STRUCTURED_PROPERTY"],
 };
-const LIMIT = 48000;
+const LIMIT = 524288;
 function bounded(value) {
   if (Buffer.byteLength(JSON.stringify(value)) > LIMIT)
     fail("semantic_response_too_large", 413);
@@ -131,7 +128,7 @@ function parseRequest(raw) {
     (!r.snapshotDigest ||
       !Array.isArray(r.candidates) ||
       !r.candidates.length ||
-      r.candidates.length > 8)
+      r.candidates.length > semanticCandidateLimit)
   )
     fail("invalid_semantic_request");
   if (
@@ -287,14 +284,12 @@ function definitionProposal(definition, tenant) {
 
 /** Fixed public reads only. No write action, arbitrary URL/Aspect, SQL or filesystem. */
 export async function nativeSemantic(raw, context) {
+  if (typeof raw !== "string" || Buffer.byteLength(raw) > 24000) fail("invalid_semantic_request");
+  let input;
+  try { input = JSON.parse(raw); } catch { fail("invalid_semantic_request"); }
+  if (input?.contract === catalogContract) return nativeSemanticCatalog(input, context);
   const r = parseRequest(raw);
-  const {
-    actor,
-    assertActive,
-    frontendOrigin,
-    cookieHeader,
-    fetchImpl = fetch,
-  } = context;
+  const { actor, assertActive } = context;
   if (!actor?.urn || !actor?.key || !actor?.tenant)
     fail("semantic_identity_required", 403);
   if (!Array.isArray(context.sources))
@@ -309,84 +304,7 @@ export async function nativeSemantic(raw, context) {
     publicationAuthorized: false,
     asOf: new Date().toISOString(),
   };
-  const cookie = datahubSessionCookie(cookieHeader);
-  const signal = AbortSignal.timeout(20000);
-  async function call(path, body) {
-    assertActive();
-    try {
-      const response = await fetchImpl(new URL(path, frontendOrigin), {
-        method: body === undefined ? "GET" : "POST",
-        redirect: "manual",
-        signal,
-        headers: { "content-type": "application/json", cookie },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      });
-      if (!response.ok || !response.body) {
-        await response.body?.cancel();
-        throw new Error();
-      }
-      const chunks = [];
-      let size = 0;
-      for await (const chunk of response.body) {
-        size += chunk.length;
-        if (size > 1048576) throw new Error();
-        chunks.push(chunk);
-      }
-      const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-      if (
-        value?.errors !== undefined &&
-        (!Array.isArray(value.errors) || value.errors.length)
-      )
-        throw new Error();
-      assertActive();
-      return value;
-    } catch {
-      fail("semantic_catalog_unavailable", 409);
-    }
-  }
-  async function canRead(urn, type) {
-    const data = await call("/api/v2/graphql", {
-      query:
-        "query($input:GetGrantedPrivilegesInput!){getGrantedPrivileges(input:$input){privileges}}",
-      variables: {
-        input: {
-          actorUrn: actor.urn,
-          resourceSpec: { resourceType: type, resourceUrn: urn },
-        },
-      },
-    });
-    const privileges = data.data?.getGrantedPrivileges?.privileges;
-    return (
-      Array.isArray(privileges) &&
-      privileges.some((p) =>
-        ["GET_ENTITY", "VIEW_ENTITY_PAGE", "EDIT_ENTITY"].includes(p),
-      )
-    );
-  }
-  async function authorize(urn, type) {
-    if (!(await canRead(urn, type))) fail("semantic_read_forbidden", 403);
-  }
-  async function identity() {
-    const value = await call("/api/v2/graphql", {
-      query:
-        "query { me { corpUser { urn } platformPrivileges { manageIngestion } } }",
-    });
-    if (value.data?.me?.corpUser?.urn !== actor.urn)
-      fail("semantic_identity_required", 403);
-    // DataHub's public Source resolver still requires MANAGE_INGESTION. Do not bypass it
-    // by exploiting a more permissive generic entity reader.
-    if (value.data.me.platformPrivileges?.manageIngestion !== true)
-      fail("semantic_source_forbidden", 403);
-  }
-  async function entity(urn, type, names) {
-    const rows = await call(
-      `/openapi/v3/entity/${type.toLowerCase()}/batchGet?systemMetadata=true`,
-      [{ urn, ...Object.fromEntries(names.map((name) => [name, {}])) }],
-    );
-    if (!Array.isArray(rows) || rows.length !== 1 || rows[0]?.urn !== urn)
-      fail("semantic_catalog_invalid", 409);
-    return rows[0];
-  }
+  const { call, canRead, authorize, identity, entity } = semanticNativeClient(context);
   async function readSource(policy) {
     const row = await entity(policy.urn, "dataHubIngestionSource", [
       "dataHubIngestionSourceInfo",
@@ -922,7 +840,7 @@ export async function nativeSemantic(raw, context) {
     // Read-only source validation is connector-neutral; ingestion execution retains its
     // separate connector, executor, sink, debug and command restrictions unchanged.
     const items = [];
-    for (const policy of sources) items.push((await readSource(policy)).source);
+    for (const policy of sources) items.push({ ...(await readSource(policy)).source, reviewPolicy: semanticReviewPolicy(policy) });
     await identity();
     return bounded({ ...common, sources: items });
   }
@@ -930,6 +848,7 @@ export async function nativeSemantic(raw, context) {
   if (!policy) fail("semantic_source_not_approved", 403);
   const sourceState = await readSource(policy);
   const { source } = sourceState;
+  common.reviewPolicy = semanticReviewPolicy(policy);
   let datasetUrns = [];
   // Scope URNs themselves are metadata. Native ACL can narrow the configured
   // model scope; do not disclose revoked members or block other readable assets.

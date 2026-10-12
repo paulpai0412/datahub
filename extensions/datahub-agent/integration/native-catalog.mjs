@@ -44,8 +44,8 @@ const associationFields = Object.freeze({
 const browseSeparator = "\u241f";
 const routes = {
   DATASET: "dataset",
-  DATA_FLOW: "dataFlow",
-  DATA_JOB: "dataJob",
+  DATA_FLOW: "pipelines",
+  DATA_JOB: "tasks",
   CHART: "chart",
   DASHBOARD: "dashboard",
   TAG: "tag",
@@ -224,11 +224,11 @@ function parse(raw) {
 }
 const overview = `urn type
   ... on Dataset { name lastIngested subTypes { typeNames } platform { urn name properties { displayName logoUrl } } dataPlatformInstance { urn instanceId properties { name } } properties { name description origin customProperties { key value } } editableProperties { description } browsePathV2 { path { name entity { urn type ... on Container { properties { name } subTypes { typeNames } } ... on DataPlatformInstance { instanceId instanceProperties: properties { name } } } } } }
-  ... on Container { properties { name description } subTypes { typeNames } }
-  ... on DataFlow { properties { name description } }
-  ... on DataJob { properties { name description } }
-  ... on Chart { properties { name description } }
-  ... on Dashboard { properties { name description } }
+  ... on Container { properties { name description } editableProperties { description } subTypes { typeNames } }
+  ... on DataFlow { properties { name description } editableProperties { description } }
+  ... on DataJob { properties { name description } editableProperties { description } }
+  ... on Chart { properties { name description } editableProperties { description } }
+  ... on Dashboard { properties { name description } editableProperties { description } }
   ... on Tag { properties { name description } }
   ... on GlossaryTerm { properties { name definition } }
   ... on Domain { properties { name description } }

@@ -1,6 +1,8 @@
 export const SETTINGS_SECTION_VALUES = [
   "general",
   "models",
+  "sources",
+  "connections",
   "mcp",
   "skills",
   "agents",
@@ -69,7 +71,7 @@ function selectionKey(
   section: SettingsDetailSection,
   cwd?: string | null,
 ): string | null {
-  if (section === "models" || section === "mcp") return section;
+  if (section === "models" || section === "mcp" || section === "sources" || section === "connections") return section;
   return cwd ? JSON.stringify([section, cwd]) : null;
 }
 

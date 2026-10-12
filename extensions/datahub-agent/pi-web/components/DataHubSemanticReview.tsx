@@ -10,6 +10,7 @@ import {
 type Review = {
   format: "datahub-semantic.review/1";
   publicationAuthorized: false;
+  readOnly?: boolean;
   reviewRef: { runUrn: string; decisionId: string };
   taskUrn: string;
   runVersion: string;
@@ -19,15 +20,17 @@ type Review = {
   expired: boolean;
   closed: boolean;
   stale: boolean;
-  preview: SemanticPreview;
-  candidateIds: string[];
+  delivery?: "receipt";
+  preview: SemanticPreview | { source: { urn: string; name: string }; assetUrn?: string; datasetUrn?: string };
+  candidateIds?: string[];
+  candidateCount?: number;
   reconciliation?: { status: string };
 };
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 export function isSemanticReview(value: unknown): value is Review {
   try {
-    if (new TextEncoder().encode(JSON.stringify(value)).length > 48000)
+    if (new TextEncoder().encode(JSON.stringify(value)).length > 524288)
       return false;
   } catch {
     return false;
@@ -36,6 +39,7 @@ export function isSemanticReview(value: unknown): value is Review {
     !record(value) ||
     value.format !== "datahub-semantic.review/1" ||
     value.publicationAuthorized !== false ||
+    (value.readOnly !== undefined && typeof value.readOnly !== "boolean") ||
     !record(value.reviewRef) ||
     typeof value.reviewRef.runUrn !== "string" ||
     !value.reviewRef.runUrn.startsWith("urn:li:dataProcessInstance:") ||
@@ -54,13 +58,21 @@ export function isSemanticReview(value: unknown): value is Review {
     typeof value.expired !== "boolean" ||
     typeof value.closed !== "boolean" ||
     typeof value.stale !== "boolean" ||
-    !isSemanticPreview(value.preview) ||
     (value.reconciliation !== undefined &&
       (!record(value.reconciliation) ||
-        typeof value.reconciliation.status !== "string")) ||
+        typeof value.reconciliation.status !== "string"))
+  ) return false;
+  if (value.delivery === "receipt") {
+    return Number.isSafeInteger(value.candidateCount) && Number(value.candidateCount) > 0 && Number(value.candidateCount) <= 1024 &&
+      record(value.preview) && record(value.preview.source) && typeof value.preview.source.name === "string" && typeof value.preview.source.urn === "string" &&
+      typeof (value.preview.assetUrn ?? value.preview.datasetUrn) === "string" && record(value.details) &&
+      value.details.format === "datahub-semantic.review-detail/1" && typeof value.details.digest === "string" && /^[a-f0-9]{64}$/.test(value.details.digest) &&
+      Number.isSafeInteger(value.details.length) && Number(value.details.length) > 0 && Number(value.details.length) <= 1048576 && value.details.pageSize === 524288;
+  }
+  if (!isSemanticPreview(value.preview) ||
     !Array.isArray(value.candidateIds) ||
     !value.candidateIds.length ||
-    value.candidateIds.length > 8 ||
+    value.candidateIds.length > 1024 ||
     value.candidateIds.some(
       (id) => typeof id !== "string" || !/^cand_[a-f0-9]{24}$/.test(id),
     )
@@ -106,14 +118,14 @@ export function DataHubSemanticReview({ review }: { review: Review }) {
       signal?.removeEventListener("abort", dispose);
     };
     channel.port1.onmessage = (event: MessageEvent<unknown>) => {
-      if (closed || typeof event.data !== "string" || event.data.length > 48000)
+      if (closed || typeof event.data !== "string" || new TextEncoder().encode(event.data).length > 524288)
         return;
       try {
         const value: unknown = JSON.parse(event.data);
         if (!isSemanticReview(value)) throw new Error();
         setCurrent(value);
         setFresh(true);
-        setNotice("已從可信 Host 讀回；核准仍須在 Host sidepanel 完成。");
+        setNotice(value.readOnly ? "發布已停用；目前僅可讀取明細與稽核記錄。" : "已從可信 Host 讀回；核准仍須在 Host sidepanel 完成。");
       } catch {
         setFresh(false);
         setNotice("目前狀態未確認；請讀回，不要重送發布。");
@@ -134,7 +146,7 @@ export function DataHubSemanticReview({ review }: { review: Review }) {
       {
         type: open ? "datahub-semantic-review" : "datahub-semantic",
         body: JSON.stringify({
-          ...(open ? {} : { action: "read_review" }),
+          ...(open ? {} : { action: "read_review", responseMode: "receipt" }),
           ...reference,
         }),
       },
@@ -160,6 +172,7 @@ export function DataHubSemanticReview({ review }: { review: Review }) {
   }, [review.reviewRef.runUrn, review.reviewRef.decisionId]);
   const mutable =
     fresh &&
+    !current.readOnly &&
     !current.expired &&
     !current.closed &&
     !current.stale &&
@@ -170,10 +183,10 @@ export function DataHubSemanticReview({ review }: { review: Review }) {
       style={{ padding: 16, color: "var(--text)", overflowWrap: "anywhere" }}
     >
       <h3 style={{ margin: "0 0 8px" }}>
-        Semantic Steward · {current.candidateIds.length} 項提案
+        Semantic Steward · {current.candidateCount ?? current.candidateIds?.length} 項提案
       </h3>
       <p>{current.preview.source.name}</p>
-      <p>{current.preview.datasetUrn}</p>
+      <p>{"assetUrn" in current.preview ? current.preview.assetUrn : "datasetUrn" in current.preview ? current.preview.datasetUrn : ""}</p>
       <p>
         {fresh ? `狀態：${current.state}` : "歷史提案；目前狀態待核對"}
         {current.expired ? " · 已過期" : ""}

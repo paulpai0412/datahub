@@ -131,8 +131,8 @@ const stamp = (v: unknown) =>
 const nullableBool = (v: unknown) => v === null || typeof v === "boolean";
 const nativeRoutes: Record<string, string> = {
   DATASET: "dataset",
-  DATA_FLOW: "dataFlow",
-  DATA_JOB: "dataJob",
+  DATA_FLOW: "pipelines",
+  DATA_JOB: "tasks",
   CHART: "chart",
   DASHBOARD: "dashboard",
   TAG: "tag",
@@ -141,6 +141,12 @@ const nativeRoutes: Record<string, string> = {
   CORP_USER: "user",
   CORP_GROUP: "group",
   CONTAINER: "container",
+};
+// Preserve previously saved Catalog evidence with the old incorrect route names;
+// navigation below always emits the pinned, working public UI route.
+const historicalRoutes: Record<string, string> = {
+  DATA_FLOW: "dataFlow",
+  DATA_JOB: "dataJob",
 };
 function nativeEntityUrl(value: unknown) {
   if (!record(value)) return false;
@@ -156,8 +162,11 @@ function nativeEntityUrl(value: unknown) {
       !url.password &&
       !url.search &&
       !url.hash &&
-      url.pathname ===
-        `/${nativeRoutes[String(v.type)]}/${encodeURIComponent(String(v.urn))}`
+      [nativeRoutes[String(v.type)], historicalRoutes[String(v.type)]].some(
+        (route) =>
+          route !== undefined &&
+          url.pathname === `/${route}/${encodeURIComponent(String(v.urn))}`,
+      )
     );
   } catch {
     return false;
@@ -206,6 +215,7 @@ export function catalogNativeUrl(
   if (!nativeEntityUrl(value) || !value.url) return null;
   try {
     const url = new URL(value.url);
+    url.pathname = `/${nativeRoutes[value.type]}/${encodeURIComponent(value.urn)}`;
     if (tab === "schema" && value.type === "DATASET") {
       url.pathname = `${url.pathname.replace(/\/$/, "")}/Columns`;
       if (fieldPath) url.searchParams.set("highlightedPath", fieldPath);

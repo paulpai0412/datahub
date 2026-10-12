@@ -1,8 +1,22 @@
 # T06 Task／Decision 的最小官方模型擴充
 
-## 私密 Semantic 本地候選 0.1.9：模型檢查通過，尚未部署
+## Task／Run 歷史保留（2026-10-01，精確政策已套用）
 
-目前 `toolchain.lock.json`／`build.gradle` 的來源版本為 **0.1.9**。新增 `ekopSemanticReview` Entity、opaque key、含 tenant／六類 Catalog assets 的私密 Task／Run，以及 publication review 的 optional `assets`。舊 Dataset scope 型別限制不變，不新增 datastore，也不把非 Dataset 當 ingestion Dataset。
+本地已新增 [官方 retention 插件設定](../deploy/retention/README.md)，只為 `dataJob/ekopAgentTask` 與 `dataProcessInstance/ekopAgentRun` 設原生int上限2,147,483,647版本。這不是無限保存、不是新模型／datastore，也不更動全域政策。13:38Z曾核兩Aspect繼承20版本，Run v52可讀但v1不可得；14:25Z經另准公開API精確新增兩條政策，各version1 ACK／歷史與current讀回一致，5個fallback鍵未變，YAML已置active plugin路徑。不可用reader回退到current掩蓋舊缺失，也不可將政策設定成功當作真Task／Run跨20版驗收。
+
+本地synthetic native caller回歸涵蓋跨20版本、固定Task／Run讀取、缺失不復活及CAS不放寬；本次只更新精確政策及配置檔，未執行官方system-update、不恢復9041、不切換Host／UI部署。Schema／jar版本不因這份外部設定改版。升級及降低保留上限的操作界線見上述README。
+
+## Catalog 主線候選 0.1.10：本地模型通過，尚未部署
+
+目前來源版本為 **0.1.10**。既有 `ekopAgentTask` 新增 optional `assets`，讓六類 Catalog 資產可保存精確 scope；`datasets` 仍只接受 Dataset，非 Dataset Task 可為空陣列。沿用既有 Task／Run 人審，不啟用私密審核 writer 或修改原生 Policy。
+
+固定 Core 的 716 個 jars 核 SHA 後，在無憑證／network-none、1 CPU／3 GiB 容器通過 Pegasus 生成、76 個實際新舊 compiler 輸出 schema 檢查、Task assets roundtrip／負例，以及官方 loader 的 0.1.8→0.1.10 合併。舊 Task／Run 的 optional assets 均屬 `OLD_READER_IGNORES_DATA`，不是舊 Host 自動支援新操作。先前 0.1.9 的私密型別仍在模型包中，但本輪沒有向其寫入，不能宣稱原生隔離通過。
+
+本地產物與驗收界線見 [Catalog 主線本地驗證](../../../docs/verification/datahub-semantic-catalog-mainline-local-20260928.md)。目前沒有現場模型／Agent 切換或 SalesDatamart 真 E2E；新欄位不可送往尚未載入相容模型的 GMS。
+
+## 私密 Semantic 本地候選 0.1.9 歷史：模型通過，未部署
+
+2026-09-27 當時 `toolchain.lock.json`／`build.gradle` 的來源版本為 **0.1.9**。新增 `ekopSemanticReview` Entity、opaque key、含 tenant／六類 Catalog assets 的私密 Task／Run，以及 publication review 的 optional `assets`。舊 Dataset scope 型別限制不變，不新增 datastore，也不把非 Dataset 當 ingestion Dataset。
 
 初版候選在官方 loader 報 `Aspect ownership does not exist`：固定版 custom factory 排除 Core classes，不能直接重用 ownership／status。保留原失敗與診斷後，使用者明確核准改採**專屬型別＋指定 `datahub` 的原生 actor policy，保留管理員權限**，不依賴 ownership 自動授權。新候選已移除兩項 Core Aspect 註冊，沒有修改 Core 或重定義標準 Aspect。未來更換審核者須明確調整 native policy。
 

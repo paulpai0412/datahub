@@ -6,7 +6,10 @@ import {
   catalogPolicies,
   CATALOG_QUERIES,
 } from "../extensions/datahub-agent/integration/native-catalog.mjs";
-import { isCatalogResult } from "../extensions/datahub-agent/pi-web/lib/catalog-contract.ts";
+import {
+  isCatalogResult,
+  catalogNativeUrl,
+} from "../extensions/datahub-agent/pi-web/lib/catalog-contract.ts";
 import {
   catalogFixture,
   datasetUrn,
@@ -37,6 +40,94 @@ test("native actor entity read preserves edited text, exact fields, version and 
       .some((c) => c.variables.input?.resourceSpec.resourceUrn === datasetUrn),
   );
 });
+test("pipeline and task links use the pinned DataHub public UI routes, not entity type names", async () => {
+  const f = catalogFixture();
+  for (const [type, urn, route] of [
+    ["DATA_FLOW", "urn:li:dataFlow:(fixture,flow,PROD)", "pipelines"],
+    [
+      "DATA_JOB",
+      "urn:li:dataJob:(urn:li:dataFlow:(fixture,flow,PROD),job)",
+      "tasks",
+    ],
+  ]) {
+    f.state.records.set(urn, {
+      urn,
+      type,
+      properties: { name: "Fixture native link" },
+    });
+    const value = await f.run({ urn });
+    assert.ok(isCatalogResult(value));
+    const expected = `http://localhost:9002/${route}/${encodeURIComponent(urn)}`;
+    assert.equal(value.entity.url, expected);
+    const historical = structuredClone(value);
+    historical.entity.url = `http://localhost:9002/${urn.split(":")[2]}/${encodeURIComponent(urn)}`;
+    assert.ok(isCatalogResult(historical));
+    assert.equal(catalogNativeUrl(historical.entity), expected);
+    assert.equal(
+      catalogNativeUrl(historical.entity, "lineage"),
+      `${expected}/Lineage`,
+    );
+    historical.entity.url = `http://localhost:9002/settings/${encodeURIComponent(urn)}`;
+    assert.equal(isCatalogResult(historical), false);
+    assert.equal(catalogNativeUrl(historical.entity), null);
+  }
+});
+
+test("all Catalog asset readers request and display editable descriptions with source fallback", async () => {
+  for (const [type, graphType, urn] of [
+    ["CONTAINER", "Container", "urn:li:container:fixture"],
+    ["DATA_FLOW", "DataFlow", "urn:li:dataFlow:(fixture,flow,PROD)"],
+    [
+      "DATA_JOB",
+      "DataJob",
+      "urn:li:dataJob:(urn:li:dataFlow:(fixture,flow,PROD),job)",
+    ],
+    ["CHART", "Chart", "urn:li:chart:(fixture,chart)"],
+    ["DASHBOARD", "Dashboard", "urn:li:dashboard:(fixture,dashboard)"],
+  ]) {
+    const f = catalogFixture();
+    const record = {
+      urn,
+      type,
+      properties: { name: "Fixture", description: "Source text" },
+      editableProperties: { description: "Reviewed text" },
+    };
+    // A GraphQL server does not return fields omitted from the query. Model that
+    // projection at the external boundary instead of returning the entire fixture.
+    const fetchImpl = async (_url, options) => {
+      const { query } = JSON.parse(options.body);
+      if (query === CATALOG_QUERIES.identity)
+        return Response.json({
+          data: { me: { corpUser: { urn: actor.urn } } },
+        });
+      if (query === CATALOG_QUERIES.privileges)
+        return Response.json({
+          data: { getGrantedPrivileges: { privileges: ["VIEW_ENTITY_PAGE"] } },
+        });
+      const fragments = query
+        .split(`... on ${graphType} {`)
+        .slice(1)
+        .map((fragment) => fragment.split("... on ")[0]);
+      const entity = structuredClone(record);
+      if (
+        !fragments.some((fragment) =>
+          /editableProperties\s*\{\s*description\s*\}/.test(fragment),
+        )
+      )
+        delete entity.editableProperties;
+      return Response.json({ data: { entity } });
+    };
+    const value = await f.run({ urn }, { fetchImpl });
+    assert.equal(value.entity.description, "Reviewed text", type);
+    record.editableProperties.description = null;
+    assert.equal(
+      (await f.run({ urn }, { fetchImpl })).entity.description,
+      "Source text",
+      type,
+    );
+  }
+});
+
 test("search resolves only readable entities and never publishes unfiltered totals", async () => {
   const f = catalogFixture();
   f.state.denied.add(downstreamUrn);

@@ -1,0 +1,25 @@
+.panel { padding: 20px; color: var(--text); min-width: 0; max-height: 100%; overflow-y: auto; box-sizing: border-box; overflow-wrap: anywhere; }
+.panel h2 { margin: 0 0 12px; }
+.panel p { line-height: 1.55; }
+.layout { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); gap: 20px; margin-top: 16px; }
+.sources { display: flex; flex-direction: column; gap: 8px; }
+.sources > button { text-align: left; padding: 12px; min-height: 44px; color: var(--text); border: 1px solid var(--border); border-radius: 8px; background: var(--bg-panel); overflow-wrap: anywhere; cursor: pointer; }
+.sources > button[aria-current="true"] { border-color: var(--accent); background: var(--bg-selected); }
+.sources > button:disabled { opacity: .6; cursor: default; }
+.sources strong, .sources span { display: block; }
+.sources span { font-size: .85em; color: var(--text-muted); margin-top: 4px; }
+.detail { min-width: 0; }
+.detail fieldset { margin: 0; padding: 14px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+.detail label { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; min-height: 44px; box-sizing: border-box; }
+.detail input { margin-top: 4px; flex-shrink: 0; }
+.detail label:has(select) { flex-direction: column; }
+.detail select { width: 100%; min-width: 0; max-width: 100%; min-height: 44px; box-sizing: border-box; color: var(--text); background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.panel :global(.config-button) { min-width: 0; max-width: 100%; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.assets { max-height: 45dvh; overflow-y: auto; padding: 0 4px; }
+.assets label + label { border-top: 1px solid var(--border); }
+.assets small { display: block; margin-top: 4px; color: var(--text-muted); }
+.urn { font-size: .85em; overflow-wrap: anywhere; }
+.notice { padding: 12px; background: var(--bg-hover); border-left: 3px solid var(--accent); }
+.panel button:focus-visible, .panel input:focus-visible, .panel select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 700px) { .panel { padding: 14px; } .layout { grid-template-columns: minmax(0, 1fr); } }

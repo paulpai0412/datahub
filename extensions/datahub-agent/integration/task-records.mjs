@@ -3,6 +3,13 @@ import { randomUUID, createHash } from "node:crypto";
 import { datahubSessionCookie } from "./datahub-identity.mjs";
 import { validateStewardChange } from "./semantic-preservation.mjs";
 import {
+  catalogAssetScope,
+  catalogAssetType,
+  maintenanceStewardVersion,
+  isCatalogSteward,
+  semanticFieldUrn,
+} from "./semantic-catalog-contract.mjs";
+import {
   validatePublicationReview,
   canonicalPublicationJson,
   assertPublicationConsent,
@@ -108,6 +115,8 @@ export function taskRecords({
   now = Date.now,
   recompilePublication,
   verifyPublicationReadback,
+  authorizeManagedPublication,
+  authorizeMaintenancePublication,
   publicationAdoption,
   authorizeFixedEtl,
   recompileFixedEtl,
@@ -182,15 +191,44 @@ export function taskRecords({
   function scope(task) {
     requireValue(task.actor === actor.urn, "task_owner_mismatch", 403);
     const source = sources.find((entry) => entry.urn === task.source);
+    const catalog = task.assets !== undefined;
     requireValue(
-      source &&
-        Array.isArray(source.taskDatasets) &&
-        Array.isArray(task.datasets) &&
-        task.datasets.length > 0 &&
-        task.datasets.every((dataset) => source.taskDatasets.includes(dataset)),
+      source && Array.isArray(task.datasets),
       "task_scope_not_approved",
       403,
     );
+    if (catalog) {
+      const approved = catalogAssetScope(source);
+      requireValue(
+        source.semanticCatalogUpdatesApproved === true &&
+          Array.isArray(task.assets) &&
+          task.assets.length > 0 &&
+          task.assets.length <= 1024 &&
+          new Set(task.assets).size === task.assets.length &&
+          task.assets.every(
+            (asset) => catalogAssetType(asset) && approved.includes(asset),
+          ) &&
+          task.datasets.every(
+            (dataset) =>
+              catalogAssetType(dataset) === "dataset" &&
+              task.assets.includes(dataset),
+          ) &&
+          task.assets
+            .filter((asset) => catalogAssetType(asset) === "dataset")
+            .every((asset) => task.datasets.includes(asset)),
+        "task_scope_not_approved",
+        403,
+      );
+    } else
+      requireValue(
+        Array.isArray(source.taskDatasets) &&
+          task.datasets.length > 0 &&
+          task.datasets.every((dataset) =>
+            source.taskDatasets.includes(dataset),
+          ),
+        "task_scope_not_approved",
+        403,
+      );
   }
   function record(kind, id, items) {
     const [, aspect] = definitions[kind];
@@ -334,7 +372,9 @@ export function taskRecords({
       checked.source === task.value.source &&
         checked.datasets.every((dataset) =>
           task.value.datasets.includes(dataset),
-        ),
+        ) &&
+        (checked.assets === undefined ||
+          checked.assets.every((asset) => task.value.assets?.includes(asset))),
       "publication_task_scope_mismatch",
       403,
     );
@@ -437,11 +477,17 @@ export function taskRecords({
       dataPlatform: "DATA_PLATFORM",
       tag: "TAG",
       glossaryTerm: "GLOSSARY_TERM",
-      domain: "DOMAIN", glossaryNode: "GLOSSARY_NODE",
-      structuredProperty: "STRUCTURED_PROPERTY", schemaField: "SCHEMA_FIELD",
+      domain: "DOMAIN",
+      glossaryNode: "GLOSSARY_NODE",
+      structuredProperty: "STRUCTURED_PROPERTY",
+      schemaField: "SCHEMA_FIELD",
     };
     const targets = new Set(review.changes.map((change) => change.urn));
-    for (const id of new Set([...review.datasets, ...targets])) {
+    for (const id of new Set([
+      ...review.datasets,
+      ...(review.assets ?? []),
+      ...targets,
+    ])) {
       const result = await call("/api/v2/graphql", {
         query:
           "query($input:GetGrantedPrivilegesInput!){getGrantedPrivileges(input:$input){privileges}}",
@@ -499,8 +545,15 @@ export function taskRecords({
     for (const change of review.changes) {
       const current = rows.get(change.urn)?.[change.aspect];
       if (review.semanticContextJson !== undefined) {
-        requireValue(typeof recompilePublication === "function" && typeof verifyPublicationReadback === "function", "semantic_compiler_required");
-        requireValue(validateStewardChange(review, change, current?.value, actor.urn), "semantic_human_value_conflict");
+        requireValue(
+          typeof recompilePublication === "function" &&
+            typeof verifyPublicationReadback === "function",
+          "semantic_compiler_required",
+        );
+        requireValue(
+          validateStewardChange(review, change, current?.value, actor.urn),
+          "semantic_human_value_conflict",
+        );
         continue; // Addition/fill-only, never ownership/adoption of the whole Aspect.
       }
       if (!current) continue; // Absence is checked again by native per-Aspect CAS.
@@ -556,7 +609,10 @@ export function taskRecords({
       const previous = historicalConsent(decision);
       // A Steward locator proves only the selected additions, never ownership
       // of all preserved human members for a later legacy publisher.
-      requireValue(previous.semanticContextJson === undefined, "publication_target_not_owned");
+      requireValue(
+        previous.semanticContextJson === undefined,
+        "publication_target_not_owned",
+      );
       requireValue(
         previous.source === review.source &&
           previous.sourceId === review.sourceId &&
@@ -619,6 +675,40 @@ export function taskRecords({
       throw error;
     }
   }
+  async function managedPublicationRecheck(decision, review, run, task) {
+    if (review.analysisVersion === maintenanceStewardVersion) {
+      requireValue(typeof authorizeMaintenancePublication === "function" &&
+        decision.response?.text?.startsWith("semantic-maintenance/1:"), "semantic_maintenance_consent_required");
+      let proof;
+      try { proof = JSON.parse(decision.response.text.slice("semantic-maintenance/1:".length)); }
+      catch { throw new TaskRecordError("semantic_maintenance_consent_required"); }
+      const recheck = await authorizeMaintenancePublication(review, proof, { run, task });
+      requireValue(typeof recheck === "function", "semantic_maintenance_consent_required");
+      return recheck;
+    }
+    if (!decision.response?.text?.startsWith("semantic-auto/1:")) return;
+    requireValue(
+      typeof authorizeManagedPublication === "function",
+      "semantic_managed_policy_unavailable",
+    );
+    let proof;
+    try {
+      proof = JSON.parse(
+        decision.response.text.slice("semantic-auto/1:".length),
+      );
+    } catch {
+      requireValue(false, "semantic_managed_policy_invalid");
+    }
+    const recheck = await authorizeManagedPublication(review, proof, {
+      run,
+      task,
+    });
+    requireValue(
+      typeof recheck === "function",
+      "semantic_managed_policy_unavailable",
+    );
+    return recheck;
+  }
   async function publicationConsentContext(
     id,
     expectedVersion,
@@ -634,6 +724,7 @@ export function taskRecords({
     );
     requireValue(decision, "task_decision_not_found", 404);
     availableConsent(decision, review);
+    await managedPublicationRecheck(decision, review, run, task);
     await publicationVersions(review);
     const consent = availableConsent(decision, review);
     return { run, decision, review, consent };
@@ -644,6 +735,7 @@ export function taskRecords({
     nativeSessionId,
     input,
     proposal,
+    beforeSubmit,
   ) {
     keys(input, ["id", "question", "choices"]);
     requireValue(
@@ -675,10 +767,14 @@ export function taskRecords({
           )),
       "task_decision_exists",
     );
+    // Generic questions remain serial. Only a trusted Host admission callback
+    // may explicitly allow queued, unattempted typed reviews; rechecked at write.
     requireValue(
-      run.value.decisions.every(
-        (decision) => decision === existing || decision.response !== undefined,
-      ),
+      run.value.decisions.every((decision) => decision === existing || decision.response !== undefined) ||
+        (typeof beforeSubmit === "function" &&
+          run.value.decisions.every((decision) => decision === existing || decision.response !== undefined ||
+            (decision.publicationReview && !decision.publicationAttempt && !decision.executionReview && !decision.executionAttempt)) &&
+          beforeSubmit({ run, task }) === true),
       "task_decision_pending",
     );
     const review =
@@ -700,7 +796,10 @@ export function taskRecords({
           : [...run.value.decisions, decision],
       },
       expectedVersion,
-      review ? () => publication(review, task) : undefined,
+      review || beforeSubmit ? () => {
+        if (review) publication(review, task);
+        beforeSubmit?.({ run, task });
+      } : undefined,
     );
   }
   async function claimPublicationConsent(
@@ -763,13 +862,44 @@ export function taskRecords({
   async function recordPublicationOutcome(id, decisionId, attemptId, outcome) {
     const run = await read("run", id);
     requireValue(run.value.actor === actor.urn, "task_owner_mismatch", 403);
-    const decision = run.value.decisions?.find((entry) => entry.id === decisionId);
-    requireValue(decision?.publicationAttempt?.attemptId === attemptId, "publication_attempt_mismatch");
-    requireValue(decision.publicationAttempt.outcomeJson === undefined, "publication_outcome_already_recorded");
-    const outcomeJson = canonicalPublicationJson({ ...outcome, recordedAt: now() });
-    requireValue(Buffer.byteLength(outcomeJson) <= 65536, "publication_outcome_too_large");
-    return write("run", id, { ...run.value, decisions: run.value.decisions.map((entry) => entry === decision
-      ? { ...entry, publicationAttempt: { ...entry.publicationAttempt, outcomeJson } } : entry) }, run.version);
+    const decision = run.value.decisions?.find(
+      (entry) => entry.id === decisionId,
+    );
+    requireValue(
+      decision?.publicationAttempt?.attemptId === attemptId,
+      "publication_attempt_mismatch",
+    );
+    requireValue(
+      decision.publicationAttempt.outcomeJson === undefined,
+      "publication_outcome_already_recorded",
+    );
+    const outcomeJson = canonicalPublicationJson({
+      ...outcome,
+      recordedAt: now(),
+    });
+    requireValue(
+      Buffer.byteLength(outcomeJson) <= 65536,
+      "publication_outcome_too_large",
+    );
+    return write(
+      "run",
+      id,
+      {
+        ...run.value,
+        decisions: run.value.decisions.map((entry) =>
+          entry === decision
+            ? {
+                ...entry,
+                publicationAttempt: {
+                  ...entry.publicationAttempt,
+                  outcomeJson,
+                },
+              }
+            : entry,
+        ),
+      },
+      run.version,
+    );
   }
   // Only the owning fixed-process supervisor calls this seam. No result-writing
   // operation is exposed to the model/browser. Preserve closed/revoked history;
@@ -1127,9 +1257,140 @@ export function taskRecords({
       ...executionAttempt,
     };
   }
+  /** Resolve one selected semantic value, never adopt a whole Aspect/collection.
+   * Native provenance only locates the original approved and initially successful
+   * Decision. Preserved human associations remain context, not Agent property.
+   */
+  async function priorSemanticSelection(assetUrn, selector, source, current, schemaVersion) {
+      const { kind, fieldPath, propertyUrn } = selector;
+      requireValue(["description", "domain", "tag", "term", "property"].includes(kind), "invalid_semantic_selector");
+      const locator = nativePublicationProvenance(current?.systemMetadata);
+      if (!locator || !locator.runUrn.startsWith(`urn:li:dataProcessInstance:semantic-${actor.key}-`))
+        return { status: "NO_AGENT_BASELINE" };
+      const owner = await getRun(locator.runUrn);
+      requireValue(owner.value.actor === actor.urn, "task_owner_mismatch", 403);
+      // Another Source's provenance is not this Source's Agent baseline. Keep
+      // existing values under ordinary human protection; do not adopt or expose
+      // foreign history. getRun still enforces identity/ACL and Task/Run binding.
+      if (owner.value.source !== source) return { status: "NO_AGENT_BASELINE" };
+      const task = await getTask(owner.value.task, owner.value.taskVersion);
+      scope(task.value);
+      const policy = sources.find((entry) => entry.urn === source);
+      requireValue(task.value.agent === policy?.semanticAgentUrn && task.value.actor === actor.urn &&
+        task.value.source === source && task.version === owner.value.taskVersion && task.value.datasets.includes(assetUrn),
+        "publication_target_not_owned", 403);
+      const decision = owner.value.decisions.find((entry) => entry.id === locator.decisionId);
+      const review = historicalConsent(decision);
+      if (!isCatalogSteward(review.analysisVersion) ||
+          decision.publicationAttempt.attemptId !== locator.attemptId || review.source !== source)
+        return { status: "NO_AGENT_BASELINE" };
+      let saved, outcome;
+      try {
+        saved = JSON.parse(review.semanticContextJson);
+        outcome = JSON.parse(decision.publicationAttempt.outcomeJson ?? "null");
+      } catch {
+        return { status: "UNVERIFIED_AGENT_BASELINE" };
+      }
+      const candidateIndex = saved?.request?.candidates?.findIndex((item) =>
+        item.kind === kind && item.fieldPath === fieldPath && (kind !== "property" || item.value === propertyUrn));
+      const aspect = fieldPath === undefined
+        ? { description: "editableDatasetProperties", domain: "domains", tag: "globalTags", term: "glossaryTerms", property: "structuredProperties" }[kind]
+        : kind === "property" ? "structuredProperties" : "editableSchemaMetadata";
+      const targetUrn = kind === "property" && fieldPath !== undefined ? semanticFieldUrn(assetUrn, fieldPath) : assetUrn;
+      const change = review.changes.find((item) => item.urn === targetUrn && item.aspect === aspect);
+      if (saved?.actor !== actor.urn || saved.request.assetUrn !== assetUrn ||
+          !change || outcome?.status !== "VERIFIED_CURRENT_VALUES" ||
+          !Number.isSafeInteger(outcome.recordedAt) || outcome.recordedAt < decision.publicationAttempt.claimedAt ||
+          outcome.contextVerification?.status !== "SOURCE_SCHEMA_REFERENCES_RECHECKED" ||
+          outcome.observations?.length !== review.changes.length ||
+          !outcome.observations.every((item, index) => item.state === "MATCHED" &&
+            item.urn === review.changes[index].urn && item.aspect === review.changes[index].aspect))
+        return { status: "UNVERIFIED_AGENT_BASELINE" };
+      // A successful sibling edit does not prove authorship of this selector.
+      if (!Number.isSafeInteger(candidateIndex) || candidateIndex < 0) return { status: "NO_SELECTED_AGENT_BASELINE" };
+      const selected = saved.preview?.changes?.[candidateIndex];
+      const candidate = saved.request.candidates[candidateIndex];
+      if (!selected || selected.kind !== kind || selected.fieldPath !== fieldPath ||
+          (kind === "property" && selected.value !== propertyUrn) ||
+          !Object.hasOwn(selected, "before") || !Object.hasOwn(selected, "after"))
+        return { status: "UNVERIFIED_AGENT_BASELINE" };
+      const observed = outcome.observations.find((item) => item.urn === targetUrn && item.aspect === aspect);
+      const intact = observed?.version === current.systemMetadata.version &&
+        canonicalPublicationJson(current.value) === change.valueJson;
+      return {
+        status: intact ? "VERIFIED_AGENT_BASELINE" : "CURRENT_CHANGED",
+        value: selected.after,
+        ownership: "SELECTED_CHANGE_ONLY",
+        mutation: candidate.operation,
+        ...(Array.isArray(selected.before) && Array.isArray(selected.after) ? {
+          changedValues: {
+            added: selected.after.filter((item) => !selected.before.some((old) => isDeepStrictEqual(old, item))),
+            removed: selected.before.filter((item) => !selected.after.some((next) => isDeepStrictEqual(next, item))),
+          },
+        } : {}),
+        schemaUnchanged: saved.guards?.asset?.schemaMetadata === schemaVersion,
+        reviewRef: { runUrn: locator.runUrn, decisionId: locator.decisionId },
+        attemptId: locator.attemptId,
+      };
+  }
   return {
     getTask,
     getRun,
+    priorSemanticSelection,
+    async ownedSemanticDefinition(targetUrn, aspect, current, source) {
+      const latest = nativePublicationProvenance(current?.systemMetadata);
+      requireValue(latest?.runUrn.startsWith(`urn:li:dataProcessInstance:semantic-${actor.key}-`), "semantic_maintenance_definition_not_owned");
+      async function record(reference) {
+        const run = await getRun(reference.runUrn), task = await getTask(run.value.task, run.value.taskVersion);
+        requireValue(run.value.actor === actor.urn && run.value.source === source && task.value.source === source &&
+          task.value.agent === sources.find((entry) => entry.urn === source)?.semanticAgentUrn, "semantic_maintenance_definition_not_owned");
+        const decision = run.value.decisions.find((entry) => entry.id === reference.decisionId), review = historicalConsent(decision);
+        requireValue(isCatalogSteward(review.analysisVersion) && decision.publicationAttempt.attemptId === reference.attemptId,
+          "semantic_maintenance_definition_not_owned");
+        let saved, outcome;
+        try { saved = JSON.parse(review.semanticContextJson); outcome = JSON.parse(decision.publicationAttempt.outcomeJson ?? "null"); }
+        catch { throw new TaskRecordError("semantic_maintenance_target_unresolved"); }
+        const change = review.changes.find((entry) => entry.urn === targetUrn && entry.aspect === aspect);
+        requireValue(change && saved.request.definition && outcome?.status === "VERIFIED_CURRENT_VALUES" &&
+          outcome.contextVerification?.status === "SOURCE_SCHEMA_REFERENCES_RECHECKED" &&
+          outcome.recordedAt >= decision.publicationAttempt.claimedAt && outcome.observations?.length === review.changes.length &&
+          outcome.observations.every((entry, index) => entry.state === "MATCHED" && entry.urn === review.changes[index].urn && entry.aspect === review.changes[index].aspect),
+          "semantic_maintenance_target_unresolved");
+        return { saved, change, observation: outcome.observations.find((entry) => entry.urn === targetUrn && entry.aspect === aspect) };
+      }
+      const previous = await record(latest);
+      requireValue(previous.observation.version === current.systemMetadata.version &&
+        previous.change.valueJson === canonicalPublicationJson(current.value), "semantic_maintenance_definition_current_changed");
+      const creationRef = previous.saved.request.definition.operation === "create" ? latest : previous.saved.maintenance?.ownedDefinition?.creationRef;
+      requireValue(creationRef && text(creationRef.runUrn, 1024) && text(creationRef.decisionId, 128) && text(creationRef.attemptId, 128),
+        "semantic_maintenance_definition_not_owned");
+      const creation = await record(creationRef);
+      requireValue(creation.saved.request.definition.operation === "create" && creation.change.expectedVersion === "-1",
+        "semantic_maintenance_definition_not_owned");
+      return { creationRef, basis: "native_initial_success_and_intact_current_agent_version", unknownGlobalImpact: true };
+    },
+    async assertResolvedSemanticTarget(targetUrn, aspect, current, source) {
+      const locator = nativePublicationProvenance(current?.systemMetadata);
+      if (!locator || !locator.runUrn.startsWith(`urn:li:dataProcessInstance:semantic-${actor.key}-`)) return;
+      const owner = await getRun(locator.runUrn);
+      if (owner.value.source !== source) return;
+      requireValue(owner.value.actor === actor.urn, "task_owner_mismatch", 403);
+      const decision = owner.value.decisions.find((entry) => entry.id === locator.decisionId);
+      const review = historicalConsent(decision);
+      requireValue(decision.publicationAttempt.attemptId === locator.attemptId &&
+        review.changes.some((entry) => entry.urn === targetUrn && entry.aspect === aspect), "semantic_maintenance_target_unresolved");
+      let outcome;
+      try { outcome = JSON.parse(decision.publicationAttempt.outcomeJson ?? "null"); }
+      catch { throw new TaskRecordError("semantic_maintenance_target_unresolved"); }
+      requireValue(outcome?.status === "VERIFIED_CURRENT_VALUES" &&
+        outcome.contextVerification?.status === "SOURCE_SCHEMA_REFERENCES_RECHECKED" &&
+        outcome.recordedAt >= decision.publicationAttempt.claimedAt && outcome.observations?.length === review.changes.length &&
+        outcome.observations.every((entry, index) => entry.state === "MATCHED" && entry.urn === review.changes[index].urn && entry.aspect === review.changes[index].aspect),
+        "semantic_maintenance_target_unresolved");
+    },
+    priorSemanticDescription(assetUrn, fieldPath, source, current, schemaVersion) {
+      return priorSemanticSelection(assetUrn, { kind: "description", fieldPath }, source, current, schemaVersion);
+    },
     // Registry metadata is association, not runtime authority. Choose only an
     // unambiguous visible native record; never invent an Agent URN.
     async resolveTaskAgent() {
@@ -1161,11 +1422,12 @@ export function taskRecords({
     authorizeExecutionCommit,
     recordExecutionOutcome,
     authorizeRun: activeRun,
-    async createTask(id, input) {
+    async createTask(id, input, beforeSubmit) {
       keys(input, [
         "agent",
         "source",
         "datasets",
+        "assets",
         "instructions",
         "allowDecisions",
       ]);
@@ -1174,7 +1436,7 @@ export function taskRecords({
           input.agent.startsWith("urn:li:aiAgent:") &&
           text(input.instructions, 2048) &&
           Array.isArray(input.datasets) &&
-          input.datasets.length <= 16 &&
+          input.datasets.length <= (input.assets === undefined ? 16 : 1024) &&
           new Set(input.datasets).size === input.datasets.length &&
           (input.allowDecisions === undefined ||
             typeof input.allowDecisions === "boolean"),
@@ -1185,9 +1447,33 @@ export function taskRecords({
         allowDecisions: input.allowDecisions ?? true,
       };
       scope(value);
-      return write("task", id, value, "-1");
+      return write("task", id, value, "-1", beforeSubmit);
     },
-    async bindRun(id, taskId, taskVersion, nativeSessionId) {
+    /** Host-only successor allocation. Only instructions change; native Task
+     * versions retain prior cycles and activeRun rejects old-version workers.
+     */
+    async advanceSemanticTask(id, expectedVersion, instructions, beforeSubmit) {
+      requireValue(text(instructions, 2048) && typeof beforeSubmit === "function", "semantic_managed_cycle_invalid");
+      const task = await getTask(id);
+      scope(task.value);
+      requireValue(task.version === expectedVersion, "task_revision_conflict");
+      const prefix = "semantic-managed-cycle/1:";
+      let previous, next;
+      try {
+        requireValue(task.value.instructions.startsWith(prefix) && instructions.startsWith(prefix), "semantic_managed_cycle_invalid");
+        previous = JSON.parse(task.value.instructions.slice(prefix.length));
+        next = JSON.parse(instructions.slice(prefix.length));
+      } catch {
+        throw new TaskRecordError("semantic_managed_cycle_invalid");
+      }
+      requireValue(next.generation === (previous.generation ?? 1) + 1 &&
+        ["scopeFingerprint", "executionUrn", "policyId", "policyDigest", "datasetCount", "fieldCount"].every((key) => next[key] === previous[key]) &&
+        next.previousCycleRunUrn && next.currentCycleRunUrn &&
+        next.expiresAt === next.createdAt + 7200000,
+        "semantic_managed_cycle_invalid");
+      return write("task", id, { ...task.value, instructions }, expectedVersion, beforeSubmit);
+    },
+    async bindRun(id, taskId, taskVersion, nativeSessionId, beforeSubmit) {
       requireValue(
         text(nativeSessionId, 128) && versionPattern.test(taskVersion),
       );
@@ -1206,10 +1492,11 @@ export function taskRecords({
           decisions: [],
         },
         "-1",
+        beforeSubmit,
       );
     },
-    async appendDecision(id, expectedVersion, nativeSessionId, input) {
-      return appendDecision(id, expectedVersion, nativeSessionId, input);
+    async appendDecision(id, expectedVersion, nativeSessionId, input, beforeSubmit) {
+      return appendDecision(id, expectedVersion, nativeSessionId, input, undefined, beforeSubmit);
     },
     /** Internal Host compiler seam only. There is deliberately no JSON route
      * accepting a proposal from an agent/browser. Source validation and actual
@@ -1221,6 +1508,7 @@ export function taskRecords({
       nativeSessionId,
       input,
       proposal,
+      beforeSubmit,
     ) {
       requireValue(proposal !== undefined, "publication_proposal_required");
       return appendDecision(
@@ -1229,26 +1517,89 @@ export function taskRecords({
         nativeSessionId,
         input,
         proposal,
+        beforeSubmit,
       );
     },
     /** Host-only narrowing: one Run CAS rejects the prior pending plan and
      * appends its selected replacement. No consent is carried forward. */
-    async selectPublicationReview(id, expectedVersion, nativeSessionId, decisionId, expectedDigest, proposal, nextId) {
-      const { run, task } = await activeRun(id, expectedVersion, nativeSessionId);
-      requireValue(task.value.allowDecisions === true, "task_decisions_disabled");
-      const previous = run.value.decisions.find((entry) => entry.id === decisionId);
-      requireValue(previous && !previous.response && !previous.publicationAttempt, "task_decision_already_answered");
-      const old = publication(previous.publicationReview, task), review = publication(proposal, task);
-      requireValue(old.semanticContextJson && review.semanticContextJson && old.planDigest === expectedDigest &&
-        review.candidateIds.every((key) => old.candidateIds.includes(key)), "semantic_selection_mismatch");
-      requireValue(text(nextId, 128) && !run.value.decisions.some((entry) => entry.id === nextId), "task_decision_exists");
+    async selectPublicationReview(
+      id,
+      expectedVersion,
+      nativeSessionId,
+      decisionId,
+      expectedDigest,
+      proposal,
+      nextId,
+    ) {
+      const { run, task } = await activeRun(
+        id,
+        expectedVersion,
+        nativeSessionId,
+      );
+      requireValue(
+        task.value.allowDecisions === true,
+        "task_decisions_disabled",
+      );
+      const previous = run.value.decisions.find(
+        (entry) => entry.id === decisionId,
+      );
+      requireValue(
+        previous && !previous.response && !previous.publicationAttempt,
+        "task_decision_already_answered",
+      );
+      const old = publication(previous.publicationReview, task),
+        review = publication(proposal, task);
+      requireValue(
+        old.semanticContextJson &&
+          review.semanticContextJson &&
+          old.planDigest === expectedDigest &&
+          review.candidateIds.every((key) => old.candidateIds.includes(key)),
+        "semantic_selection_mismatch",
+      );
+      requireValue(
+        text(nextId, 128) &&
+          !run.value.decisions.some((entry) => entry.id === nextId),
+        "task_decision_exists",
+      );
       await publicationVersions(review);
       const at = now();
-      const replacement = { id: nextId, question: previous.question, choices: [], requestedAt: at, publicationReview: review };
-      return write("run", id, { ...run.value, decisions: [...run.value.decisions.map((entry) => entry === previous
-        ? { ...entry, response: { action: "RESPOND", actor: actor.urn, respondedAt: at, text: `Selection superseded by ${nextId}; no consent carried forward.`,
-          publicationVerdict: { purpose: old.purpose, planDigest: old.planDigest, verdict: "REJECT" } } } : entry), replacement] },
-        expectedVersion, () => publication(review, task));
+      const replacement = {
+        id: nextId,
+        question: previous.question,
+        choices: [],
+        requestedAt: at,
+        publicationReview: review,
+      };
+      return write(
+        "run",
+        id,
+        {
+          ...run.value,
+          decisions: [
+            ...run.value.decisions.map((entry) =>
+              entry === previous
+                ? {
+                    ...entry,
+                    response: {
+                      action: "RESPOND",
+                      actor: actor.urn,
+                      respondedAt: at,
+                      text: `Selection superseded by ${nextId}; no consent carried forward.`,
+                      publicationVerdict: {
+                        purpose: old.purpose,
+                        planDigest: old.planDigest,
+                        verdict: "REJECT",
+                      },
+                    },
+                  }
+                : entry,
+            ),
+            replacement,
+          ],
+        },
+        expectedVersion,
+        () => publication(review, task),
+      );
     },
     async respondPublicationReview(
       id,
@@ -1256,8 +1607,15 @@ export function taskRecords({
       nativeSessionId,
       decisionId,
       input,
+      managedProof,
     ) {
       keys(input, ["verdict", "planDigest"]);
+      requireValue(
+        managedProof === undefined ||
+          (input.verdict === "APPROVE" &&
+            (typeof authorizeManagedPublication === "function" || typeof authorizeMaintenancePublication === "function")),
+        "semantic_managed_policy_unavailable",
+      );
       requireValue(["APPROVE", "REJECT"].includes(input.verdict));
       const { run, task } = await activeRun(
         id,
@@ -1285,19 +1643,36 @@ export function taskRecords({
         input.planDigest === review.planDigest,
         "publication_review_digest_mismatch",
       );
+      const maintenance = review.analysisVersion === maintenanceStewardVersion;
       if (input.verdict === "APPROVE") {
+        if (maintenance) {
+          requireValue(managedProof !== undefined && typeof authorizeMaintenancePublication === "function",
+            "semantic_maintenance_consent_required");
+          await authorizeMaintenancePublication(review, managedProof, { run, task });
+        }
         await publicationVersions(review);
         if (review.semanticContextJson !== undefined) {
           await recompile(review);
           await publicationGrants(review);
-          await ownedPublicationTargets(review, await publicationVersions(review));
+          await ownedPublicationTargets(
+            review,
+            await publicationVersions(review),
+          );
         }
+        if (managedProof !== undefined && !maintenance)
+          await authorizeManagedPublication(review, managedProof, {
+            run,
+            task,
+          });
       }
       const response = {
         action: "RESPOND",
         actor: actor.urn,
         respondedAt: now(),
-        text: `${review.purpose} review ${input.verdict} recorded; no metadata was published.`,
+        text:
+          managedProof === undefined
+            ? `${review.purpose} review ${input.verdict} recorded; no metadata was published.`
+            : `${maintenance ? "semantic-maintenance/1:" : "semantic-auto/1:"}${JSON.stringify(managedProof)}`,
         publicationVerdict: {
           purpose: review.purpose,
           planDigest: review.planDigest,
@@ -1400,6 +1775,15 @@ export function taskRecords({
         );
         publication(review, task);
         assertPublicationConsent(decision, review, actor.urn, now());
+        // Scope is the last native read: later Task/Run reads could otherwise
+        // allow recipe/schema drift past this admission snapshot. This is not
+        // a cross-entity transaction; target writes still enforce their own CAS.
+        const recheckManaged = await managedPublicationRecheck(
+          decision,
+          review,
+          run,
+          task,
+        );
         const body = {};
         for (const change of review.changes) {
           const entity = change.urn.split(":")[2];
@@ -1426,8 +1810,11 @@ export function taskRecords({
           Buffer.byteLength(JSON.stringify(body), "utf8") <= 524288,
           "publication_batch_too_large",
         );
-        // Nothing is awaited between the final expiry check and target dispatch.
+        // Neither human consent nor managed policy may expire during the reads above.
+        // Nothing is awaited between these final checks and target dispatch.
         publication(review, task);
+        assertPublicationConsent(decision, review, actor.urn, now());
+        recheckManaged?.();
         targetRequestInvoked = true;
         const ack = await call(
           "/openapi/v3/entity/generic?async=false&systemMetadata=true",
@@ -1468,26 +1855,40 @@ export function taskRecords({
         if (review.semanticContextJson !== undefined) {
           contextVerification = await verifyPublicationReadback(review);
           await recordPublicationOutcome(id, decisionId, admitted.attemptId, {
-            status: "VERIFIED_CURRENT_VALUES", observations, contextVerification,
+            status: "VERIFIED_CURRENT_VALUES",
+            observations,
+            contextVerification,
           });
         }
-        return { status: "VERIFIED_CURRENT_VALUES", ...admitted, observations, ...(contextVerification ? { contextVerification } : {}) };
+        return {
+          status: "VERIFIED_CURRENT_VALUES",
+          ...admitted,
+          observations,
+          ...(contextVerification ? { contextVerification } : {}),
+        };
       } catch (error) {
         // Even a batch 412 or failed readback may follow partial native writes.
         const reason =
           error instanceof TaskRecordError &&
-          /^(?:publication|task|datahub|semantic)_[a-z_]{1,100}$/.test(error.message)
+          /^(?:publication|task|datahub|semantic)_[a-z_]{1,100}$/.test(
+            error.message,
+          )
             ? error.message
             : "publication_validation_failed";
         let outcomeRecordingConfirmed = false;
         if (review.semanticContextJson !== undefined) {
           try {
             await recordPublicationOutcome(id, decisionId, admitted.attemptId, {
-              status: targetRequestInvoked ? "UNKNOWN_OR_CONTEXT_CHANGED" : "NOT_DISPATCHED",
-              reason, ...(observations ? { observations } : {}),
+              status: targetRequestInvoked
+                ? "UNKNOWN_OR_CONTEXT_CHANGED"
+                : "NOT_DISPATCHED",
+              reason,
+              ...(observations ? { observations } : {}),
             });
             outcomeRecordingConfirmed = true;
-          } catch { /* Keep original error and consumed admission; read-only reconciliation only. */ }
+          } catch {
+            /* Keep original error and consumed admission; read-only reconciliation only. */
+          }
         }
         throw new TaskRecordError(
           targetRequestInvoked
@@ -1501,7 +1902,9 @@ export function taskRecords({
             planDigest: review.planDigest,
             targetRequestInvoked,
             reason,
-            ...(review.semanticContextJson !== undefined ? { outcomeRecordingConfirmed } : {}),
+            ...(review.semanticContextJson !== undefined
+              ? { outcomeRecordingConfirmed }
+              : {}),
             ...(observations ? { observations } : {}),
           },
         );
@@ -1525,7 +1928,9 @@ export function taskRecords({
           review.source === task.value.source &&
           review.datasets.every((dataset) =>
             task.value.datasets.includes(dataset),
-          ),
+          ) &&
+          (review.assets === undefined ||
+            review.assets.every((asset) => task.value.assets?.includes(asset))),
         "publication_task_scope_mismatch",
         403,
       );
@@ -1590,6 +1995,7 @@ export function taskRecords({
       nativeSessionId,
       decisionId,
       input,
+      beforeSubmit,
     ) {
       keys(input, ["action", "text"]);
       requireValue(
@@ -1642,6 +2048,7 @@ export function taskRecords({
           ...(input.action === "DISMISS" ? { closedAt: at } : {}),
         },
         expectedVersion,
+        beforeSubmit ? () => beforeSubmit({ run, task }) : undefined,
       );
     },
     async closeRun(id, expectedVersion, nativeSessionId) {

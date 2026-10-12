@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
+import { isCatalogSteward, validateCatalogStewardChange } from "./semantic-catalog-contract.mjs";
 
 // Only the typed Steward compiler may use these; the legacy semantic publisher
 // retains its original allowlist and whole-Aspect ownership requirement.
@@ -78,23 +79,29 @@ export function preservesSemanticValue(
 }
 
 export function validateStewardChange(review, change, current, actor) {
+  if (isCatalogSteward(review.analysisVersion)) return validateCatalogStewardChange(review, change, current, actor);
   if (
     review.purpose !== "SEMANTIC" ||
     review.analysisVersion !== stewardVersion ||
     typeof review.semanticContextJson !== "string"
   )
     return false;
-  const context = JSON.parse(review.semanticContextJson);
+  let context, before, after;
+  try {
+    context = JSON.parse(review.semanticContextJson);
+    before = JSON.parse(change.beforeValueJson);
+    after = JSON.parse(change.valueJson);
+  } catch {
+    return false;
+  }
   if (
-    context.actor !== actor ||
+    context?.actor !== actor ||
     !Number.isSafeInteger(context.createdAt) ||
     context.createdAt < 0 ||
     context.createdAt >= review.expiresAt ||
     !Object.hasOwn(change, "beforeValueJson")
   )
     return false;
-  const before = JSON.parse(change.beforeValueJson),
-    after = JSON.parse(change.valueJson);
   if (!isDeepStrictEqual(before, current ?? null)) return false;
   const entity = change.urn.split(":")[2];
   if (!["dataset", "schemaField"].includes(entity))

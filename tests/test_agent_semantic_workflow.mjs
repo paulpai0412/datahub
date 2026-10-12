@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import { semanticPublicationFixture } from "./fixtures/semantic-publication-fixture.mjs";
 import { datasetUrn, sourceUrn, requestId, actor, envelope } from "./fixtures/semantic-fixture.mjs";
 import { taskRecords } from "../extensions/datahub-agent/integration/task-records.mjs";
-import semanticExtension from "../extensions/datahub-agent/pi-web/lib/datahub-semantic-extension.ts";
+import { createRequire } from "node:module";
+const { createJiti } = createRequire(new URL("../extensions/datahub-agent/pi-web/package.json", import.meta.url))("jiti");
+const { default: semanticExtension } = await createJiti(import.meta.url).import("../extensions/datahub-agent/pi-web/lib/datahub-semantic-extension.ts");
 import { makePublicationReview, canonicalPublicationJson } from "../extensions/datahub-agent/integration/publication-review.mjs";
 
 async function prepareInput(f, proposal, inspection = {}) {
@@ -42,9 +44,9 @@ test("native request → Task/Run/Decision → human approval → CAS → stored
 
 test("model tool retains read-only recovery locators from an unconfirmed preparation", async () => {
   let tool;
-  semanticExtension({ on() {}, registerTool(value) { tool = value; } });
+  semanticExtension({ on() {}, appendEntry() {}, registerTool(value) { tool = value; } });
   const result = await tool.execute("fixture", { action: "prepare_review", sourceUrn, datasetUrn }, new AbortController().signal, undefined,
-    { mode: "rpc", sessionManager: { getSessionId: () => "11111111-1111-4111-8111-111111111111" }, ui: { async input(_title, body) {
+    { mode: "rpc", abort() {}, sessionManager: { getSessionId: () => "11111111-1111-4111-8111-111111111111" }, ui: { notify() {}, async input(_title, body) {
       const request = JSON.parse(body);
       return JSON.stringify({ error: "task_write_unconfirmed", reconciliation: { runUrn: "urn:li:dataProcessInstance:fixture", taskUrn: "urn:li:dataJob:fixture", decisionId: request.requestId } });
     } } });

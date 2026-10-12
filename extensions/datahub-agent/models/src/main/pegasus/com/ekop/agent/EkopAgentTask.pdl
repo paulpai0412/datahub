@@ -24,6 +24,12 @@ record EkopAgentTask {
   @UrnValidation = { "entityTypes": [ "dataset" ], "exist": false }
   datasets: array[Urn]
 
+  /** Exact Catalog semantic scope. Dataset members also appear in datasets;
+   * non-Dataset assets never imply ingestion membership. Native Task ACL applies.
+   */
+  @UrnValidation = { "entityTypes": [ "dataset", "container", "dataFlow", "dataJob", "chart", "dashboard" ] }
+  assets: optional array[Urn]
+
   /** User-authored task instructions, never interpreted as authority. */
   instructions: string
 

@@ -170,6 +170,7 @@ export interface ChatInputHandle {
 const TOOL_PRESETS = [
   "chat-only",
   "datahub-only",
+  "semantic-governance",
   "read-only",
   "default",
   "full",
@@ -179,6 +180,7 @@ type ToolPresetLabel = (typeof TOOL_PRESETS)[number];
 const TOOL_PRESET_MAP: Record<ToolPresetLabel, ToolPreset> = {
   "chat-only": "none",
   "datahub-only": "datahub-only",
+  "semantic-governance": "semantic-governance",
   "read-only": "read-only",
   default: "default",
   full: "full",
@@ -2143,7 +2145,9 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
       ? t("chat.chatOnly")
       : rawToolPresetLabel === "datahub-only"
         ? t("chat.datahubOnly")
-        : rawToolPresetLabel;
+        : rawToolPresetLabel === "semantic-governance"
+          ? t("chat.semanticGovernance")
+          : rawToolPresetLabel;
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -3696,6 +3700,8 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                           if (lvl === "chat-only") desc = t("chat.chatOnly");
                           else if (lvl === "datahub-only")
                             desc = t("chat.datahubOnlyDescription");
+                          else if (lvl === "semantic-governance")
+                            desc = t("chat.semanticGovernanceDescription");
                           else if (lvl === "read-only")
                             desc = t("chat.readOnlyTools", { count: 4 });
                           else if (lvl === "default")
@@ -3756,7 +3762,11 @@ export const ChatInput = forwardRef<ChatInputHandle, Props>(function ChatInput(
                               ) : (
                                 <span style={{ width: 10, flexShrink: 0 }} />
                               )}
-                              <span style={{ flex: 1 }}>{lvl}</span>
+                              <span style={{ flex: 1 }}>
+                                {lvl === "semantic-governance"
+                                  ? t("chat.semanticGovernance")
+                                  : lvl}
+                              </span>
                               <span
                                 style={{
                                   fontSize: 11,

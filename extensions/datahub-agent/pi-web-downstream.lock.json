@@ -1,7 +1,83 @@
 {
   "upstream_lock_sha256": "639fa77b24701537ef988158b479e396c0bfd49cf5ee3a72d041147effee9270",
-  "patch_sha256": "72a6cf62deb10f7aaf867cb954b7dcee9fe63cfb2deef1560c52273bd94c9350",
+  "patch_sha256": "1ac95bf2a8071aa9237535058df42fcc83a5741074056ce61e854d601956d764",
   "files": {
+    "components/DataHubConnectionSettings.tsx": {
+      "sha256": "aa8479db64f1de2715d62644c9471c852440183cedb0901658305df12c71d0bf",
+      "mode": 420
+    },
+    "components/DataHubSemanticBatchReview.tsx": {
+      "sha256": "12ba80b61e5e2a1e35f991521f305c8c8cf489e750fd3dca86f1d024d6f6ba62",
+      "mode": 420
+    },
+    "components/DataHubSemanticCatalogPreview.tsx": {
+      "sha256": "1a47e4dfe1d7f3e63ec8d6ab141afafba0b00a51dca66c720b828d1a072c5b11",
+      "mode": 420
+    },
+    "components/DataHubSemanticMaintenance.tsx": {
+      "sha256": "e9a69f94bbe0a5b5250ef2edad2e3cfcb526bad8ecee33dec791f1be8986221d",
+      "mode": 420
+    },
+    "components/DataHubSemanticMaintenancePanel.tsx": {
+      "sha256": "7ffea8a08debc65c004d36d561df9cff1b1bc23c4413781ca42863459abed19f",
+      "mode": 420
+    },
+    "components/DataHubSemanticManagedCycle.test.mjs": {
+      "sha256": "55a02b9cf7ead95dde7edea37b39e138a6faf330ca0765ca2e28d40912584ba5",
+      "mode": 420
+    },
+    "components/DataHubSemanticManagedCycle.tsx": {
+      "sha256": "53594de4c9be3cbb559b1eb30325d64686d90334f045daad27b8c03aacef9493",
+      "mode": 420
+    },
+    "components/DataHubSourceSettings.module.css": {
+      "sha256": "45816f1692f88575c97095351470fe0b13e4eb93f5cd5d777c38db0c12920916",
+      "mode": 420
+    },
+    "components/DataHubSourceSettings.tsx": {
+      "sha256": "fdcebbfe6d55dc349b5e5ebd2c0d420645914e9cf46c57fc94af0b73306b7216",
+      "mode": 420
+    },
+    "lib/model-tool-probe.ts": {
+      "sha256": "c2290fe28d8a483979dcd2bb5ae086e7fef9244163ac73103f519c7a7fc4ee51",
+      "mode": 420
+    },
+    "lib/semantic-foreground-continuation.test.mjs": {
+      "sha256": "908d57bc555b44cf207d7b9c10dd5a712ab9da6a5f524658cfa8a80f06c2ade6",
+      "mode": 420
+    },
+    "lib/semantic-input-correction.mjs": {
+      "sha256": "e9e082eb246de5ab9673987296ef2b880951b0c38b835d307aa7223fd52d7ef3",
+      "mode": 420
+    },
+    "lib/semantic-inspection-binding.test.mjs": {
+      "sha256": "d54161313c2d9df127d83f54eaeec253917b77675b5d42438f9f35424f7b056c",
+      "mode": 420
+    },
+    "lib/semantic-maintenance-panel-context.ts": {
+      "sha256": "74232760ae0c56c1fbea82f3ee39f5c03e87158bb0ffb2565dd09f31561e8d35",
+      "mode": 420
+    },
+    "lib/semantic-native-lineage.test.mjs": {
+      "sha256": "1967f48d325759dd6c841d12e483ecd63845ff90a411e2a0939842983dbeb96b",
+      "mode": 420
+    },
+    "lib/semantic-operation-history.ts": {
+      "sha256": "85d030165e42538518227c78476b137e03a191e9f218dca0d38f2a59d02ccbcf",
+      "mode": 420
+    },
+    "lib/semantic-sdk-tool-policy.test.mjs": {
+      "sha256": "29fc01d4113e0c61771e49f92120f91c45664791b55048ecd7cebd24a9a3d61b",
+      "mode": 420
+    },
+    "lib/semantic-self-stale-root.test.mjs": {
+      "sha256": "7ca008d2ce610cb15285ef705fcf3661215313e4d032835c65d0372c7422e346",
+      "mode": 420
+    },
+    "lib/semantic-tool-selection.test.mjs": {
+      "sha256": "041bd664f5eb715d6c31a2b793d59ab14e9ab774f8df980b1ba230f9494d8eaa",
+      "mode": 420
+    },
     ".github/workflows/ci.yml": {
       "sha256": "8264c281e466357e508448af8e14063f69a45bef52ccf8dd077ef729f99cd3ca",
       "mode": 420
@@ -399,7 +475,7 @@
       "mode": 420
     },
     "components/AppShell.tsx": {
-      "sha256": "6e31dfd22a8a5b1e525defee2f504f94b253ab50f4902f01d023b2c9d9c18c00",
+      "sha256": "9219d7672626f523fbe6d9f62ddb646f2ecd177f8d21070791e97b6f30f9426e",
       "mode": 420
     },
     "components/AppShell.workspace-memory.test.mjs": {
@@ -427,11 +503,11 @@
       "mode": 420
     },
     "components/ChatInput.test.mjs": {
-      "sha256": "d93813b551782d1fef9a4ff5b61d71553b133ce3d8c0ebf52069c7e2c60a7d57",
+      "sha256": "4cd6442a563dbf47fa4cca39eba269fe6352466fe4190dac1d8a0ff41e231f3b",
       "mode": 420
     },
     "components/ChatInput.tsx": {
-      "sha256": "9edb98df5826a7f7494e2ae6a86cdf193f78cbd87cb478bb629b01ca5584f182",
+      "sha256": "f8e92066702ad4711ac88fc59aff9a58fd4964d7648e1e34d7895e535955e091",
       "mode": 420
     },
     "components/ChatMinimap.module.css": {
@@ -507,7 +583,7 @@
       "mode": 420
     },
     "components/DataHubGrafanaPanel.module.css": {
-      "sha256": "a8e9044a973eca81ab49ba0bac19aea6c8b41d6e1bdef44fa831eebe78618842",
+      "sha256": "7cc613803d9a224ba3a8870ec7c8ca26006bfed3a47e3d0ee5e456664b3f2da0",
       "mode": 420
     },
     "components/DataHubGrafanaPanel.tsx": {
@@ -531,11 +607,11 @@
       "mode": 420
     },
     "components/DataHubSemanticPreview.tsx": {
-      "sha256": "79df293bc8aa350e7e49b04c5230da6a05d8924ec3965c399369172d2ddafd8d",
+      "sha256": "1d504156bfde5a50a7b9e0fddbdc861e263e6344473b5d1cc10f28716c3db29f",
       "mode": 420
     },
     "components/DataHubSemanticReview.tsx": {
-      "sha256": "691bb4734caf00f6837ada52f1451a1a8cef8da850b4b7d1f631c3b58413a6eb",
+      "sha256": "0629bdacbe965f5b6523e2a0f34687f542959ef9e0d0c80bb465e2c67335747a",
       "mode": 420
     },
     "components/DataHubSqlCard.module.css": {
@@ -623,7 +699,7 @@
       "mode": 420
     },
     "components/MessageView.tsx": {
-      "sha256": "8cbf1a3fb1e087039f4d132b8d5fefd9585006f07102e43822147646ba17eec0",
+      "sha256": "d8d29b312c3805b66c6fddf8da4f5216c08cef346fc5d52256d684b46f8b70f3",
       "mode": 420
     },
     "components/MobilePwaLayout.test.mjs": {
@@ -687,7 +763,7 @@
       "mode": 420
     },
     "components/SettingsPanel.tsx": {
-      "sha256": "a134d0ddd868bea7a469e837808d55dab44de75e2587d2657daac965c7c6666b",
+      "sha256": "18ee24afb63fb77f008f24ec00782f91faf68f632231bac30d8c2b6f59b6476f",
       "mode": 420
     },
     "components/SettingsUi.test.mjs": {
@@ -995,7 +1071,7 @@
       "mode": 420
     },
     "lib/catalog-contract.ts": {
-      "sha256": "6a0ae6813d3f8c346ac81e2ef7899dd1345ddfaff71b60adda9be3202d7fa7e6",
+      "sha256": "45ab138c7b89edff020cde0bffc1e676a42e1b695e16cbe8f6fc160eb5c13145",
       "mode": 420
     },
     "lib/catalog-icon-paths.ts": {
@@ -1099,7 +1175,7 @@
       "mode": 420
     },
     "lib/datahub-semantic-extension.ts": {
-      "sha256": "5fce632ccd2af49faa06a0d5243638c351c038c460882480f5672d5099fc9498",
+      "sha256": "e1a1adcb74968e4a8936f76d797eb4888a35df7ada66c7d53c76997707cb74ea",
       "mode": 420
     },
     "lib/datahub-sql-extension.ts": {
@@ -1267,15 +1343,15 @@
       "mode": 420
     },
     "lib/i18n/messages/en.ts": {
-      "sha256": "765fa3fd2685d34943ec4eb11d3147fb1c81a177e01a3e09aaa54b6ef7a8e94a",
+      "sha256": "cce7d095bcaadf4e1cde8a6e67b127d66d9a5ff82e157a23a0357ef30c56a4b1",
       "mode": 420
     },
     "lib/i18n/messages/zh-CN.ts": {
-      "sha256": "a9a407c4c3b5c1c008ef7720ed4f15f50bad9a14cbabba21218449659c5de515",
+      "sha256": "a21248ba5a9d5d4666026f5c68f7b15cf81d9d0e8b9150a1b17fc0cd66dcaeb7",
       "mode": 420
     },
     "lib/i18n/messages/zh-TW.ts": {
-      "sha256": "fb9b1e278bc79d01c8e8177825435600839afd562da0aa4a7d48409ecebb6333",
+      "sha256": "7dffd9b8489e1cac538df84e4cb61768a170a57cd546f991725ebb54e8c3d16b",
       "mode": 420
     },
     "lib/i18n/registry.test.mjs": {
@@ -1555,7 +1631,7 @@
       "mode": 420
     },
     "lib/rpc-manager-extension-ui.test.mjs": {
-      "sha256": "b38f175c3cb0ea0d22942e31faec45867eccab547588a98f0802b64bcf042c47",
+      "sha256": "0221d695784336fdaa9f3bcf1774ab57a4f7c7736a162151ad1085548cb1597c",
       "mode": 420
     },
     "lib/rpc-manager-idle-timeout.test.mjs": {
@@ -1571,11 +1647,11 @@
       "mode": 420
     },
     "lib/rpc-manager.test.mjs": {
-      "sha256": "e171dbe3006aeb5c48959f041f395ad5d51fbc6f75e588f79e76d6c34f3cbe40",
+      "sha256": "660534979fd6a7004a36a046b014920e1fec7cbbae90f8d413627948d7aa3b04",
       "mode": 420
     },
     "lib/rpc-manager.ts": {
-      "sha256": "9910766faf5fe8ad3b6f7a280c0f29cc456e53277c2067f48a3aff7cbc8de845",
+      "sha256": "4d6f818f4c4eb93eda9ecbc2e778fb3ee7fd8c44c09a850a60fea49b6e28518d",
       "mode": 420
     },
     "lib/rpc-session-info.test.mjs": {
@@ -1703,7 +1779,7 @@
       "mode": 420
     },
     "lib/session-tool-selection.ts": {
-      "sha256": "8a87039b3f9e47f1b41ee588e0e0f7d3ec3382f357c2c5d1be6dc245d86b92ff",
+      "sha256": "f7e4463d9520140b9e57ea55eab5a98fcdd1735b02dda951856e89eff9e8d350",
       "mode": 420
     },
     "lib/session-tree.test.mjs": {
@@ -1719,7 +1795,7 @@
       "mode": 420
     },
     "lib/settings-navigation.ts": {
-      "sha256": "789b4888b676cfafdec404e4d1e4d6790e0af71ff77a71eb62836aad3613e86a",
+      "sha256": "30bc056f4a6932b2bbf59b9aa5f6d93c5dd511802a2f2adf56832f260543b93d",
       "mode": 420
     },
     "lib/skill-frontmatter.test.mjs": {
@@ -1899,7 +1975,7 @@
       "mode": 420
     },
     "lib/tool-presets.ts": {
-      "sha256": "a6d8ad60cdd87a82525c60f5c798978b0aa6e79c0cac0dfba9a8bbe0e8bfad33",
+      "sha256": "5205992fd3f037eb135422bc821ab0cb0e0033d62625d0475055f38f3cdb5c84",
       "mode": 420
     },
     "lib/tool-result-images.ts": {
@@ -2275,7 +2351,7 @@
       "mode": 420
     },
     "skills/datahub-semantic/SKILL.md": {
-      "sha256": "101220c2cb0a1e94083bccc6e869e6c28eb92c49afa2160a2d5ab5dac76bccd9",
+      "sha256": "6b449c64b646a420fb9ff1b2cb41b3f9a2081bc4e74a9168dd71cfb0ae303d73",
       "mode": 420
     },
     "skills/discovery-plugin-dev/SKILL.md": {

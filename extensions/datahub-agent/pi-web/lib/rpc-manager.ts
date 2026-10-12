@@ -1,5 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
+  type AgentSession,
   createAgentSessionFromServices,
   createAgentSessionServices,
   getAgentDir,
@@ -16,6 +17,7 @@ import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
 import { resolve } from "path";
 import { validateAgentImages } from "./image-attachments";
+import { abortModelToolProbe, isModelToolProbeRunning, probeModelTools } from "./model-tool-probe";
 import { invalidateModelsCache } from "./models-cache";
 import { resolveVisibleModels, selectInitialModelScope } from "./model-scope";
 import {
@@ -37,8 +39,10 @@ import { persistExplicitStartupPreferences } from "./startup-preferences";
 import discoveryPluginDevelopment from "./discovery-plugin-dev-extension";
 import { pluginDevelopmentResources } from "./discovery-plugin-profile";
 import {
-  PLUGIN_DEVELOPMENT_TOOL, PLUGIN_DEVELOPMENT_TOOLS,
-  isPluginDevelopmentSelection, validatePluginDevelopmentSelection,
+  PLUGIN_DEVELOPMENT_TOOL,
+  PLUGIN_DEVELOPMENT_TOOLS,
+  isPluginDevelopmentSelection,
+  validatePluginDevelopmentSelection,
 } from "./tool-presets";
 import { notifySessionComplete } from "./web-push";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
@@ -74,7 +78,10 @@ import {
 import { createSubagentController } from "./subagent-runtime";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { resolveShellTools } from "./powershell-settings";
-import { PRESET_DATAHUB_ONLY } from "./tool-presets";
+import {
+  PRESET_DATAHUB_ONLY,
+  PRESET_SEMANTIC_GOVERNANCE,
+} from "./tool-presets";
 import {
   CHAT_ONLY_RESOURCE_LOADER_OPTIONS,
   contextFilesSystemPrompt,
@@ -82,6 +89,7 @@ import {
 import {
   appendSessionToolSelection,
   isDataHubOnlySelection,
+  isSemanticGovernanceSelection,
   readSessionToolSelection,
   validateSessionToolSelection,
 } from "./session-tool-selection";
@@ -287,16 +295,43 @@ class PlainTextTheme extends Theme {
 const PLAIN_TEXT_THEME = new PlainTextTheme();
 const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 
+function dataHubToolProfile(toolNames: string[] | undefined) {
+  if (toolNames && isDataHubOnlySelection(toolNames)) return "datahub-only";
+  if (toolNames && isSemanticGovernanceSelection(toolNames))
+    return "semantic-governance";
+  return undefined;
+}
+
+export function sdkToolsForSelection(
+  toolNames: string[] | undefined,
+): string[] | undefined {
+  // The SDK registry allowlist also governs late registration and refresh/reload.
+  // Narrowing only the active set cannot constrain an asynchronous extension.
+  if (
+    toolNames &&
+    (dataHubToolProfile(toolNames) || isPluginDevelopmentSelection(toolNames))
+  )
+    return [...toolNames];
+  return toolNames?.length === 0 ? [] : undefined;
+}
+
 export function withExtensionTools(
   session: AgentSessionLike,
   toolNames: string[],
 ): string[] {
   if (toolNames.length === 0) return [];
   validatePluginDevelopmentSelection(toolNames);
-  if (isPluginDevelopmentSelection(toolNames)) return [...PLUGIN_DEVELOPMENT_TOOLS];
-  if (isDataHubOnlySelection(toolNames)) {
+  if (isPluginDevelopmentSelection(toolNames))
+    return [...PLUGIN_DEVELOPMENT_TOOLS];
+  if (
+    isDataHubOnlySelection(toolNames) ||
+    isSemanticGovernanceSelection(toolNames)
+  ) {
     const available = new Set(session.getAllTools().map((tool) => tool.name));
-    return PRESET_DATAHUB_ONLY.filter((name) => available.has(name));
+    const selected = isSemanticGovernanceSelection(toolNames)
+      ? PRESET_SEMANTIC_GOVERNANCE
+      : PRESET_DATAHUB_ONLY;
+    return selected.filter((name) => available.has(name));
   }
 
   const codingToolNames = new Set(CODING_TOOL_NAMES);
@@ -307,7 +342,9 @@ export function withExtensionTools(
   const extensionToolNames = session
     .getAllTools()
     .map((t) => t.name)
-    .filter((name) => !codingToolNames.has(name) && name !== PLUGIN_DEVELOPMENT_TOOL);
+    .filter(
+      (name) => !codingToolNames.has(name) && name !== PLUGIN_DEVELOPMENT_TOOL,
+    );
 
   return [...new Set([...selectedToolNames, ...extensionToolNames])];
 }
@@ -392,7 +429,7 @@ export class AgentSessionWrapper {
   isRunning(): boolean {
     return (
       this._alive &&
-      (this.pendingPromptCount > 0 ||
+      (isModelToolProbeRunning(this.inner) || this.pendingPromptCount > 0 ||
         this.inner.isStreaming ||
         this.inner.isCompacting ||
         this.inner.isBashRunning)
@@ -405,6 +442,10 @@ export class AgentSessionWrapper {
 
   isPluginDevelopment(): boolean {
     return this.pluginDevelopment;
+  }
+
+  getDataHubToolProfile() {
+    return dataHubToolProfile(this.selectedToolNames);
   }
 
   hasSuppressedCompletionNotifications(): boolean {
@@ -486,7 +527,7 @@ export class AgentSessionWrapper {
               notifyType: "warning",
               message:
                 "Extension requested shutdown, but shutdown is not supported in Pi Web.",
-            } as ExtensionUiRequest as AgentEvent),
+            } satisfies ExtensionUiRequest),
           onError: (error) =>
             this.emit({
               type: "extension_error",
@@ -503,6 +544,7 @@ export class AgentSessionWrapper {
       if (
         this.selectedToolNames &&
         (isDataHubOnlySelection(this.selectedToolNames) ||
+          isSemanticGovernanceSelection(this.selectedToolNames) ||
           isPluginDevelopmentSelection(this.selectedToolNames))
       )
         this.setActiveToolSelection(this.selectedToolNames);
@@ -539,6 +581,7 @@ export class AgentSessionWrapper {
       type === "follow_up" ||
       type === "get_commands" ||
       type === "get_tools" ||
+      type === "diagnose_model_tools" ||
       type === "get_state"
     );
   }
@@ -573,7 +616,14 @@ export class AgentSessionWrapper {
 
   setActiveToolSelection(toolNames: string[]): void {
     if (this.pluginDevelopment !== isPluginDevelopmentSelection(toolNames)) {
-      throw new Error("Changing the development resource profile requires session recreation");
+      throw new Error(
+        "Changing the development resource profile requires session recreation",
+      );
+    }
+    if (this.getDataHubToolProfile() !== dataHubToolProfile(toolNames)) {
+      throw new Error(
+        "Changing the DataHub tool profile requires session recreation",
+      );
     }
     this.selectedToolNames = [...toolNames];
     this.inner.setActiveToolsByName(withExtensionTools(this.inner, toolNames));
@@ -647,6 +697,9 @@ export class AgentSessionWrapper {
     // Pi normally delays the first flush until an assistant message exists.
     // A leading shell command has no assistant message, so mark this SDK
     // manager as flushed after writing its own generated entries.
+    // SAFETY: the pinned SDK's SessionManager owns this boolean flush marker;
+    // its exact header/entries were exclusively written above. This existing
+    // adapter prevents that same initial buffer from being appended twice.
     (manager as unknown as { flushed: boolean }).flushed = true;
     cacheSessionPath(this.inner.sessionId, sessionFile);
   }
@@ -704,6 +757,9 @@ export class AgentSessionWrapper {
     const type = command.type as string;
     const allowedDuringReplacement =
       COMMANDS_ALLOWED_DURING_SESSION_REPLACEMENT.has(type);
+    if (isModelToolProbeRunning(this.inner) && !allowedDuringReplacement && type !== "abort") {
+      throw new Error("model_tool_probe_busy");
+    }
     if (this.sessionReplacement && !allowedDuringReplacement) {
       throw new Error("Session is being copied to a new session");
     }
@@ -734,6 +790,12 @@ export class AgentSessionWrapper {
       }
 
       switch (type) {
+        case "diagnose_model_tools": {
+          if (this.isRunning() || this.activeMutatingCommands > 1 || this.inner.pendingMessageCount > 0 || this.pendingUiRequests.size > 0) {
+            throw new Error("model_tool_probe_busy");
+          }
+          return await probeModelTools(this.inner as AgentSession, command.expectedSessionId);
+        }
         case "prompt": {
           // Serialize only admission. Once the preceding prompt has either
           // passed or failed preflight, the SDK can atomically decide whether
@@ -755,6 +817,7 @@ export class AgentSessionWrapper {
               | "steer"
               | "followUp"
               | undefined;
+            const promptStopSignal = this.extensionUiAbortController.signal;
             let preflightAccepted = false;
             let preflightSettled = false;
             let promptSettled = false;
@@ -796,6 +859,10 @@ export class AgentSessionWrapper {
                 // validation and extension preflight have accepted the submission.
                 preflightResult: (success) => {
                   if (success) {
+                    // Stop can occur in asynchronous before_agent_start reads,
+                    // before the SDK has a low-level run for abort() to cancel.
+                    // Reject at the existing preflight boundary, before provider.
+                    if (promptStopSignal.aborted) throw promptStopSignal.reason;
                     this.applyExactSystemPrompt();
                     acceptPreflight();
                   }
@@ -846,7 +913,12 @@ export class AgentSessionWrapper {
         }
 
         case "abort":
+          abortModelToolProbe(this.inner);
           this.forceShutdownOnIdle = true;
+          // The pinned SDK aborts only the active low-level run. A followUp
+          // queued at agent_end would otherwise start a fresh run after Stop.
+          // Cancel future dispatch as well, using its supported public queue API.
+          this.inner.clearQueue();
           // Stop must unwind extension commands that have not started the agent yet.
           this.extensionUiAbortController.abort(
             new DOMException("Extension UI cancelled by Stop", "AbortError"),
@@ -865,7 +937,7 @@ export class AgentSessionWrapper {
             sessionId: this.inner.sessionId,
             sessionFile: this.inner.sessionFile ?? "",
             isStreaming: this.inner.isStreaming,
-            isPromptRunning: this.pendingPromptCount > 0,
+            isPromptRunning: this.pendingPromptCount > 0 || isModelToolProbeRunning(this.inner),
             isBashRunning: this.inner.isBashRunning,
             isCompacting: this.inner.isCompacting,
             autoCompactionEnabled: this.inner.autoCompactionEnabled,
@@ -1228,7 +1300,10 @@ export class AgentSessionWrapper {
         }
 
         case "bash": {
-          if (this.pluginDevelopment) throw new Error("Shell execution is unavailable in plugin development sessions");
+          if (this.pluginDevelopment)
+            throw new Error(
+              "Shell execution is unavailable in plugin development sessions",
+            );
           if (
             this.pendingPromptCount > 0 ||
             this.inner.isStreaming ||
@@ -1281,6 +1356,7 @@ export class AgentSessionWrapper {
 
   destroy(): void {
     if (!this._alive) return;
+    abortModelToolProbe(this.inner);
     this._alive = false;
     if (this.idleTimer) clearTimeout(this.idleTimer);
     if (this.inner.isBashRunning) this.inner.abortBash();
@@ -1400,7 +1476,7 @@ export class AgentSessionWrapper {
       widgetKey: key,
       widgetLines: undefined,
       widgetPlacement: undefined,
-    } as ExtensionUiRequest as AgentEvent);
+    } satisfies ExtensionUiRequest);
   }
 
   private clearExtensionWidget(key: string, emitClear = true): number {
@@ -1527,7 +1603,7 @@ export class AgentSessionWrapper {
       widgetKey: active.key,
       widgetLines,
       widgetPlacement: active.placement,
-    } as ExtensionUiRequest as AgentEvent);
+    } satisfies ExtensionUiRequest);
   }
 
   private setExtensionWidgetFactory(
@@ -1613,7 +1689,7 @@ export class AgentSessionWrapper {
       id,
       method: "custom",
       lines,
-    } as ExtensionUiRequest as AgentEvent;
+    } satisfies ExtensionUiRequest;
     this.pendingUiRequests.set(id, event);
     this.emit(event);
   }
@@ -1635,7 +1711,7 @@ export class AgentSessionWrapper {
       method: "custom",
       lines: [],
       closed: true,
-    } as ExtensionUiRequest as AgentEvent);
+    } satisfies ExtensionUiRequest);
     custom.resolve(value);
   }
 
@@ -1850,7 +1926,7 @@ export class AgentSessionWrapper {
           method: "notify",
           message,
           notifyType: type,
-        } as ExtensionUiRequest as AgentEvent);
+        } satisfies ExtensionUiRequest);
       },
       onTerminalInput: () => () => {},
       setStatus: (key, text) => {
@@ -1862,7 +1938,7 @@ export class AgentSessionWrapper {
           method: "setStatus",
           statusKey: key,
           statusText: text,
-        } as ExtensionUiRequest as AgentEvent);
+        } satisfies ExtensionUiRequest);
       },
       setWorkingMessage: () => {},
       setWorkingVisible: () => {},
@@ -1873,7 +1949,7 @@ export class AgentSessionWrapper {
         if (typeof content === "function") {
           this.setExtensionWidgetFactory(
             key,
-            content as unknown as ExtensionWidgetFactory,
+            content as ExtensionWidgetFactory,
             options,
           );
           return;
@@ -1899,7 +1975,7 @@ export class AgentSessionWrapper {
           widgetKey: key,
           widgetLines: content,
           widgetPlacement: options?.placement,
-        } as ExtensionUiRequest as AgentEvent);
+        } satisfies ExtensionUiRequest);
       },
       setFooter: () => {},
       setHeader: () => {},
@@ -1909,7 +1985,7 @@ export class AgentSessionWrapper {
           id: randomUUID(),
           method: "setTitle",
           title,
-        } as ExtensionUiRequest as AgentEvent);
+        } satisfies ExtensionUiRequest);
       },
       custom: <T = unknown>(factory: unknown, options?: unknown) =>
         this.requestExtensionCustomUi<T>(factory, options),
@@ -1919,7 +1995,7 @@ export class AgentSessionWrapper {
           id: randomUUID(),
           method: "set_editor_text",
           text,
-        } as ExtensionUiRequest as AgentEvent);
+        } satisfies ExtensionUiRequest);
       },
       setEditorText: (text) => {
         this.emit({
@@ -1927,7 +2003,7 @@ export class AgentSessionWrapper {
           id: randomUUID(),
           method: "set_editor_text",
           text,
-        } as ExtensionUiRequest as AgentEvent);
+        } satisfies ExtensionUiRequest);
       },
       getEditorText: () => "",
       addAutocompleteProvider: () => {},
@@ -2117,11 +2193,7 @@ export async function setRpcSessionTools(
   if (!existing?.isAlive()) {
     if (!sessionFile) throw new Error("Session not found");
     const manager = SessionManager.open(sessionFile, undefined);
-    if (
-      readSubagentSessionResources(
-        manager.getEntries() as unknown as SessionEntry[],
-      )
-    ) {
+    if (readSubagentSessionResources(manager.getEntries() as SessionEntry[])) {
       throw new Error("Subagent tool selection is fixed by its profile");
     }
     appendSessionToolSelection(manager, toolNames);
@@ -2138,7 +2210,7 @@ export async function setRpcSessionTools(
     throw new Error("Cannot change tools while the session is running");
   if (
     readSubagentSessionResources(
-      existing.inner.sessionManager.getEntries() as unknown as SessionEntry[],
+      existing.inner.sessionManager.getEntries() as SessionEntry[],
     )
   ) {
     throw new Error("Subagent tool selection is fixed by its profile");
@@ -2151,7 +2223,9 @@ export async function setRpcSessionTools(
   const crossesResourceBoundary =
     !hasCurrentResourcePolicy ||
     existing.isChatOnly() !== (toolNames.length === 0) ||
-    existing.isPluginDevelopment() !== isPluginDevelopmentSelection(toolNames);
+    existing.isPluginDevelopment() !==
+      isPluginDevelopmentSelection(toolNames) ||
+    existing.getDataHubToolProfile?.() !== dataHubToolProfile(toolNames);
   appendSessionToolSelection(existing.inner.sessionManager, toolNames);
   invalidateSessionListCache();
 
@@ -2234,7 +2308,7 @@ export function getRpcSessionInfos(): SessionInfo[] {
 
     const manager = session.inner.sessionManager;
     const header = manager.getHeader();
-    const entries = manager.getEntries() as unknown as Array<
+    const entries = manager.getEntries() as Array<
       { type: string; timestamp: string } | SessionMessageEntry
     >;
     const messages = entries.filter(
@@ -2246,7 +2320,7 @@ export function getRpcSessionInfos(): SessionInfo[] {
     const sessionFile = manager.getSessionFile() ?? session.sessionFile;
     const persisted = Boolean(sessionFile && existsSync(sessionFile));
     const subagent = readSubagentRun(
-      entries as unknown as SessionEntry[],
+      entries as SessionEntry[],
       header?.id ?? session.sessionId,
       sessionFile ?? "",
     );
@@ -2372,19 +2446,23 @@ export async function startRpcSession(
   const sessionCwd = sessionManager.getCwd();
   const subagentResources = sessionFile
     ? readSubagentSessionResources(
-        sessionManager.getEntries() as unknown as SessionEntry[],
+        sessionManager.getEntries() as SessionEntry[],
       )
     : null;
   const persistedToolNames = subagentResources
     ? undefined
-    : readSessionToolSelection(
-        sessionManager.getEntries() as unknown as SessionEntry[],
-      );
+    : readSessionToolSelection(sessionManager.getEntries() as SessionEntry[]);
   const selectedToolNames =
     subagentResources?.tools ?? persistedToolNames ?? requestedToolNames;
   const pluginDevelopment = isPluginDevelopmentSelection(selectedToolNames);
-  if (pluginDevelopment && (subagentResources || process.env.DATAHUB_DISCOVERY_PLUGIN_DEVELOPMENT !== "true")) {
-    throw new Error("Discovery plugin development is not enabled for this session");
+  if (
+    pluginDevelopment &&
+    (subagentResources ||
+      process.env.DATAHUB_DISCOVERY_PLUGIN_DEVELOPMENT !== "true")
+  ) {
+    throw new Error(
+      "Discovery plugin development is not enabled for this session",
+    );
   }
   if (
     !subagentResources &&
@@ -2407,14 +2485,11 @@ export async function startRpcSession(
     // Since v0.68.0, session creation expects string[] tool names instead of Tool[] instances.
     let toolsOption: string[] | undefined = subagentResources?.tools;
     if (!subagentResources && selectedToolNames !== undefined) {
-      // toolNames === [] -> "all off" (an empty allow-list disables every tool).
-      // Otherwise DO NOT pass a builtin-only allow-list: passing CODING_TOOL_NAMES
-      // set allowedToolNames to coding builtins only, which filtered every
-      // extension/package-provided tool (e.g. subagents, web access) out of the
-      // tool registry — so they were unavailable in Pi Web sessions even though the
-      // `pi` CLI keeps them. Leaving the allow-list unset lets the SDK register all
-      // tools (and activate extension tools); we narrow the ACTIVE set below.
-      toolsOption = pluginDevelopment ? [...PLUGIN_DEVELOPMENT_TOOLS] : selectedToolNames.length === 0 ? [] : undefined;
+      // Exact DataHub/development profiles use the SDK registry allowlist so
+      // asynchronous registration cannot widen them. [] disables every tool.
+      // Ordinary coding selections leave the registry open to installed
+      // extensions, then narrow the active builtin set below (CLI parity).
+      toolsOption = sdkToolsForSelection(selectedToolNames);
     }
 
     // Build services first so extension-registered providers are available
@@ -2457,23 +2532,23 @@ export async function startRpcSession(
           : pluginDevelopment
             ? pluginDevelopmentResources(discoveryPluginDevelopment)
             : {
-              additionalExtensionPaths: process.env.PI_WEB_MCP_ADAPTER
-                ? [process.env.PI_WEB_MCP_ADAPTER]
-                : [],
-              extensionFactories: [
-                createProjectCommandBashExtension({
-                  cwd: sessionCwd,
-                  settings: settingsManager,
-                }),
-                createSubagentExtension(
-                  SUBAGENT_CONTROLLER.extensionRuntime,
-                  () => listSubagentProfiles(sessionCwd),
-                  isBuiltInSubagentsEnabled,
-                ),
-              ],
-              extensionsOverride: (base) =>
-                preferUserBashExtension(preferPiWebSubagentExtension(base)),
-            },
+                additionalExtensionPaths: process.env.PI_WEB_MCP_ADAPTER
+                  ? [process.env.PI_WEB_MCP_ADAPTER]
+                  : [],
+                extensionFactories: [
+                  createProjectCommandBashExtension({
+                    cwd: sessionCwd,
+                    settings: settingsManager,
+                  }),
+                  createSubagentExtension(
+                    SUBAGENT_CONTROLLER.extensionRuntime,
+                    () => listSubagentProfiles(sessionCwd),
+                    isBuiltInSubagentsEnabled,
+                  ),
+                ],
+                extensionsOverride: (base) =>
+                  preferUserBashExtension(preferPiWebSubagentExtension(base)),
+              },
       ...(trustReloadOptions
         ? { resourceLoaderReloadOptions: trustReloadOptions }
         : {}),
@@ -2484,7 +2559,8 @@ export async function startRpcSession(
     );
     const effectiveInitialModel =
       initialModel &&
-      (!allowInitialModelFallback || pluginDevelopment ||
+      (!allowInitialModelFallback ||
+        pluginDevelopment ||
         scope.visible.some(
           (model) =>
             model.provider === initialModel.provider &&
@@ -2499,13 +2575,20 @@ export async function startRpcSession(
       (entry) => entry.type === "message",
     );
     const savedModel = hasExistingMessages
-      ? getLatestModelChange(branch as unknown as SessionEntry[])
+      ? getLatestModelChange(branch as SessionEntry[])
       : null;
     const restoredModel = savedModel
       ? services.modelRuntime.getModel(savedModel.provider, savedModel.modelId)
       : undefined;
-    if (pluginDevelopment && savedModel && (!restoredModel || !services.modelRuntime.hasConfiguredAuth(savedModel.provider))) {
-      throw new Error("The saved model is unavailable in the development profile; no provider fallback is permitted");
+    if (
+      pluginDevelopment &&
+      savedModel &&
+      (!restoredModel ||
+        !services.modelRuntime.hasConfiguredAuth(savedModel.provider))
+    ) {
+      throw new Error(
+        "The saved model is unavailable in the development profile; no provider fallback is permitted",
+      );
     }
     const initial = hasExistingMessages
       ? null
@@ -2544,9 +2627,14 @@ export async function startRpcSession(
         : {}),
     });
 
-    if (pluginDevelopment && !inner.getAllTools().some(tool => tool.name === PLUGIN_DEVELOPMENT_TOOL)) {
+    if (
+      pluginDevelopment &&
+      !inner.getAllTools().some((tool) => tool.name === PLUGIN_DEVELOPMENT_TOOL)
+    ) {
       await inner.dispose();
-      throw new Error("Discovery development tool unavailable; session not started");
+      throw new Error(
+        "Discovery development tool unavailable; session not started",
+      );
     }
 
     const persistedPreferences = await persistExplicitStartupPreferences(
@@ -2577,7 +2665,10 @@ export async function startRpcSession(
       inner.setActiveToolsByName(
         withExtensionTools(
           inner,
-          selectedToolNames ?? inner.getActiveToolNames().filter(name => name !== PLUGIN_DEVELOPMENT_TOOL),
+          selectedToolNames ??
+            inner
+              .getActiveToolNames()
+              .filter((name) => name !== PLUGIN_DEVELOPMENT_TOOL),
         ),
       );
     }

@@ -9,6 +9,7 @@ export interface ToolEntry {
 export const TOOL_PRESET_VALUES = [
   "none",
   "datahub-only",
+  "semantic-governance",
   "read-only",
   "default",
   "full",
@@ -18,13 +19,22 @@ export type ToolPreset = (typeof TOOL_PRESET_VALUES)[number];
 export const PLUGIN_DEVELOPMENT_TOOL = "discovery_plugin_dev";
 export const PLUGIN_DEVELOPMENT_TOOLS = [PLUGIN_DEVELOPMENT_TOOL];
 
-export function isPluginDevelopmentSelection(tools: readonly string[] | undefined): boolean {
+export function isPluginDevelopmentSelection(
+  tools: readonly string[] | undefined,
+): boolean {
   return tools?.includes(PLUGIN_DEVELOPMENT_TOOL) ?? false;
 }
 
-export function validatePluginDevelopmentSelection(tools: readonly string[]): void {
-  if (isPluginDevelopmentSelection(tools) && (tools.length !== 1 || tools[0] !== PLUGIN_DEVELOPMENT_TOOL)) {
-    throw new Error("Plugin development must use its dedicated tool selection only");
+export function validatePluginDevelopmentSelection(
+  tools: readonly string[],
+): void {
+  if (
+    isPluginDevelopmentSelection(tools) &&
+    (tools.length !== 1 || tools[0] !== PLUGIN_DEVELOPMENT_TOOL)
+  ) {
+    throw new Error(
+      "Plugin development must use its dedicated tool selection only",
+    );
   }
 }
 
@@ -33,6 +43,10 @@ export const PRESET_DATAHUB_ONLY = [
   "datahub_catalog",
   "datahub_sql",
   "datahub_grafana",
+] as const;
+export const PRESET_SEMANTIC_GOVERNANCE = [
+  "datahub_catalog",
+  "datahub_semantic",
 ] as const;
 export const PRESET_READ_ONLY: string[] = ["read", "grep", "find", "ls"];
 export const PRESET_DEFAULT: string[] = ["read", "bash", "edit", "write"];
@@ -64,7 +78,13 @@ export function getPresetFromToolNames(
   toolNames: readonly string[],
 ): ToolPreset {
   if (toolNames.length === 0) return "none";
-  if (toolNames.length === 1 && toolNames[0] === PLUGIN_DEVELOPMENT_TOOL) return "plugin-dev";
+  if (toolNames.length === 1 && toolNames[0] === PLUGIN_DEVELOPMENT_TOOL)
+    return "plugin-dev";
+  if (
+    toolNames.length === PRESET_SEMANTIC_GOVERNANCE.length &&
+    PRESET_SEMANTIC_GOVERNANCE.every((name) => toolNames.includes(name))
+  )
+    return "semantic-governance";
   if (
     toolNames.length === PRESET_DATAHUB_ONLY.length &&
     PRESET_DATAHUB_ONLY.every((name) => toolNames.includes(name))
@@ -87,6 +107,7 @@ export function getToolNamesForPreset(preset: ToolPreset): string[] {
   if (preset === "plugin-dev") return [...PLUGIN_DEVELOPMENT_TOOLS];
   if (preset === "none") return [...PRESET_NONE];
   if (preset === "datahub-only") return [...PRESET_DATAHUB_ONLY];
+  if (preset === "semantic-governance") return [...PRESET_SEMANTIC_GOVERNANCE];
   if (preset === "read-only") return [...PRESET_READ_ONLY];
   if (preset === "full") return [...PRESET_FULL];
   return [...PRESET_DEFAULT];

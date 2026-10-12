@@ -14,6 +14,7 @@ export const enLocale: LocalePlugin = {
     "common.settings": "Settings",
     "settings.title": "Settings",
     "settings.general": "General",
+    "settings.sources": "Sources",
     "settings.generalDescription":
       "Choose how Pi Web looks and which language it uses.",
     "settings.appearance": "Appearance",
@@ -402,6 +403,9 @@ export const enLocale: LocalePlugin = {
     "chat.datahubOnly": "DataHub only",
     "chat.datahubOnlyDescription":
       "Only Catalog, controlled SQL and Grafana intent tools",
+    "chat.semanticGovernance": "Semantic governance",
+    "chat.semanticGovernanceDescription":
+      "Catalog and semantic proposals only; human approval required",
     "chat.readOnlyTools": "{count} read-only built-in tools",
     "chat.builtInTools": "{count} built-in tools",
     "chat.allBuiltInTools": "All built-in tools",

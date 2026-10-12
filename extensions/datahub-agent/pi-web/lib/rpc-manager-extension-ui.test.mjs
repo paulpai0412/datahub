@@ -20,6 +20,9 @@ function setup(t, handler = async () => {}) {
     getContextUsage: () => null,
     getSteeringMessages: () => [],
     getFollowUpMessages: () => [],
+    // No queued messages in this UI-only double. Real queued cancellation is
+    // exercised against the pinned SDK in semantic-foreground-continuation.
+    clearQueue: () => ({ steering: [], followUp: [] }),
     pendingMessageCount: 0,
     agent: { state: {}, abort() {} },
     abortRetry() {},

@@ -117,13 +117,14 @@ export async function nativeIngestion(
     if (request.sourceUrn !== undefined || request.executionUrn !== undefined)
       throw new IngestionError("invalid_ingestion_request", 400);
     return {
-      sources: sources.map((source) => ({
+      sources: sources.filter((source) => source.ingestionExecutionApproved !== false).map((source) => ({
         urn: source.urn,
         cliVersion: source.cliVersion,
       })),
     };
   }
-  if (!policy) throw new IngestionError("source_not_approved");
+  if (!policy || policy.ingestionExecutionApproved === false)
+    throw new IngestionError("source_not_approved");
   const jobAction = ["get_execution", "cancel"].includes(request.action);
   if (
     jobAction

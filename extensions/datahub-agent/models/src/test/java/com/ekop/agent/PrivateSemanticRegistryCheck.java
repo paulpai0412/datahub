@@ -59,11 +59,15 @@ public final class PrivateSemanticRegistryCheck {
           new ComparableVersion("0.1.8"), null);
       require(publicationSchema(prior).getField("assets") == null,
           "Old artifact unexpectedly has Catalog scope: classpath contamination or wrong prior artifact");
+      require(prior.getEntitySpec("dataJob").getAspectSpec("ekopAgentTask").getPegasusSchema().getField("assets") == null,
+          "Old Task artifact unexpectedly has Catalog scope");
       merged.apply(prior);
     }
     var candidate = new PatchEntityRegistry(unpack(Path.of(args[0])).toString(), "ekop-agent-tasks",
         new ComparableVersion(args[1]), null);
     require(publicationSchema(candidate).getField("assets").getOptional(), "Catalog scope not backward compatible");
+    require(candidate.getEntitySpec("dataJob").getAspectSpec("ekopAgentTask").getPegasusSchema().getField("assets").getOptional(),
+        "Task Catalog scope not backward compatible");
     merged.apply(candidate);
     require(merged.getEntitySpecs().size() == originalEntityCount + 1, "Unexpected entity additions/removals");
     var privateEntity = merged.getEntitySpec("ekopSemanticReview");

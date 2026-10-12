@@ -1,0 +1,16 @@
+# DataHub v1.7.0.1 official retention plugin configuration.
+# Local candidate only: copying/loading/applying this file needs operator approval.
+# This is the native positive int limit, NOT mathematically unlimited retention.
+# No wildcard policy, time policy, or forced overwrite of operator-owned settings.
+- entity: dataJob
+  aspect: ekopAgentTask
+  config:
+    retention:
+      version:
+        maxVersions: 2147483647
+- entity: dataProcessInstance
+  aspect: ekopAgentRun
+  config:
+    retention:
+      version:
+        maxVersions: 2147483647

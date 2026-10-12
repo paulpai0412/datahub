@@ -1,5 +1,7 @@
 "use client";
 
+import { DataHubSemanticCatalogPreview, isCatalogSemanticPreview, type CatalogSemanticPreview } from "./DataHubSemanticCatalogPreview";
+
 /** Presentation only. Stored tool details never grant approval or write authority. */
 type Evidence = { id: string; text: string };
 type Field = {
@@ -33,7 +35,7 @@ type DefinitionProposal = {
   existingDefinitionsMayNotBeUpdated: true;
   duplicateCheck: { definitions: VocabularyDefinition[]; duplicateAbsenceVerified: false; sharedDefinitionImpactVerified: false; nextStart: number | null };
 };
-export type SemanticPreview = {
+type LegacySemanticPreview = {
   format: "datahub-semantic.preview/1";
   action: "inspect_dataset" | "preview" | "preview_definition" | "inspect_impact";
   publicationAuthorized: false;
@@ -58,6 +60,7 @@ export type SemanticPreview = {
     references: { urn: string; relationship: string; sourceUrns: string[]; scope: string; outsideContextDataset: boolean }[] };
   membership?: { status: "NATIVE_RUN_MATCH" | "UNVERIFIED"; datasetUrn: string; completeSourceInventory: false };
 };
+export type SemanticPreview = LegacySemanticPreview | CatalogSemanticPreview;
 const record = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 const string = (v: unknown): v is string => typeof v === "string";
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every(string);
@@ -65,8 +68,9 @@ const nullableString = (v: unknown) => v === null || string(v);
 const integer = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0;
 
 export function isSemanticPreview(v: unknown): v is SemanticPreview {
+  if (isCatalogSemanticPreview(v)) return true;
   try {
-    if (new TextEncoder().encode(JSON.stringify(v)).length > 48000) return false;
+    if (new TextEncoder().encode(JSON.stringify(v)).length > 524288) return false;
   } catch { return false; }
   if (!record(v) || v.format !== "datahub-semantic.preview/1" || v.publicationAuthorized !== false ||
       !["inspect_dataset", "preview", "preview_definition", "inspect_impact"].includes(String(v.action)) || !string(v.asOf) ||
@@ -118,7 +122,7 @@ export function isSemanticPreview(v: unknown): v is SemanticPreview {
         nullableString(f.sourceDescription) && nullableString(f.editedDescription) &&
         strings(f.tags) && strings(f.sourceTags) && strings(f.terms) && strings(f.sourceTerms));
   }
-  return Array.isArray(v.changes) && v.changes.length > 0 && v.changes.length <= 8 && v.changes.every((c) =>
+  return Array.isArray(v.changes) && v.changes.length > 0 && v.changes.length <= 1024 && v.changes.every((c) =>
     record(c) && ["description", "domain", "tag", "term", "property", "owner", "documentation"].includes(String(c.kind)) &&
     (c.fieldPath === undefined || string(c.fieldPath)) && string(c.value) && string(c.reason) &&
     Object.hasOwn(c, "before") && Object.hasOwn(c, "after") && ["NO_CHANGE", "PROPOSED"].includes(String(c.operation)) &&
@@ -133,6 +137,7 @@ function DisplayValue({ value }: { value: unknown }) {
 }
 
 export function DataHubSemanticPreview({ preview: p }: { preview: SemanticPreview }) {
+  if ("contract" in p) return <DataHubSemanticCatalogPreview preview={p} />;
   return <section aria-label="DataHub 語義差異預覽" style={{ padding: 12, background: "var(--bg-panel)", color: "var(--text)", overflowWrap: "anywhere", minWidth: 0 }}>
     <h3 style={{ margin: "0 0 8px" }}>語義維護 · {p.action === "inspect_impact" ? "共用定義影響" : p.action === "preview_definition" ? "新定義提案" : p.action === "preview" ? "差異預覽" : "Catalog 盤點"}</h3>
     <p><strong>唯讀・尚未核准／發布</strong>。已填值或引用存在，不代表業務語義已驗證。</p>

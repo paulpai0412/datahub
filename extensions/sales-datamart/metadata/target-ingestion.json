@@ -24,7 +24,7 @@
       "database_pattern": {"allow": ["^SalesDatamart$"], "ignoreCase": false},
       "schema_pattern": {"allow": ["^dm$", "^reporting$"], "ignoreCase": false},
       "table_pattern": {
-        "allow": ["^salesdatamart\\.dm\\.(dim_date|dim_product|dim_customer|dim_territory|fact_sales_order_line)$"],
+        "allow": ["^salesdatamart\\.dm\\.(dim_date|dim_product|dim_customer|dim_territory|fact_sales_order_line)$", "^salesdatamart\\.dm\\.monthly_category_summary$"],
         "ignoreCase": false
       },
       "view_pattern": {

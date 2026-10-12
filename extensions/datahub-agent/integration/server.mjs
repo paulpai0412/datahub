@@ -8,6 +8,9 @@ import { createIdentityVerifier } from "./datahub-identity.mjs";
 import { createRuntimeManager } from "./runtime-manager.mjs";
 import { validateEgressOrigins } from "./egress-proxy.mjs";
 import { ingestionPolicies } from "./ingestion-policy.mjs";
+import { createSourceSettingsStore, createSourceSettingsHost, sourcePolicyContext } from "./source-settings.mjs";
+import { createOperatorConfigStore } from "./operator-config.mjs";
+import { createConnectionSettingsHost } from "./connection-settings.mjs";
 import { nativeIngestion } from "./native-ingestion.mjs";
 import {
   nativeCatalog,
@@ -30,7 +33,7 @@ import { createSqlHost, sqlPolicies } from "./native-sql.mjs";
 import { createGrafanaHost, grafanaPolicies } from "./native-grafana.mjs";
 import { sqlAssetAuthorizer } from "./native-sql-assets.mjs";
 import { queryMetadataReader } from "./query-metadata.mjs";
-import { queryBindings, createQuerySource } from "./query-source.mjs";
+import { queryBindings, applyQueryBindings, createQuerySource } from "./query-source.mjs";
 import { queryGrafanaConfig, createQueryGrafana } from "./query-grafana.mjs";
 import { createMetadataQueryHost } from "./metadata-query.mjs";
 import {
@@ -51,6 +54,8 @@ const fields = new Set([
   "maxRuntimes",
   "egressOriginsByActor",
   "ingestionSourcesByActor",
+  "sourceSettingsEnabled",
+  "connectionSettingsEnabled",
   "discoverySourcesByActor",
   "pluginDevelopmentByActor",
   "pluginActivationsByActor",
@@ -95,7 +100,7 @@ async function protectedGrafanaServiceKey(path) {
 
 /** Local-only entrypoint. Config is operator-owned, never supplied by a browser.
  * The standalone manager has no simulated identity or credential-discovery path. */
-export async function startAgentServer(config) {
+export async function startAgentServer(config, { configPath } = {}) {
   if (
     !config ||
     typeof config !== "object" ||
@@ -106,6 +111,14 @@ export async function startAgentServer(config) {
   ) {
     throw new Error("invalid_agent_server_configuration");
   }
+  if (config.sourceSettingsEnabled !== undefined && typeof config.sourceSettingsEnabled !== "boolean")
+    throw new Error("invalid_source_settings_configuration");
+  if (config.sourceSettingsEnabled === true && config.readOnlyCore === true)
+    throw new Error("source_settings_read_only_core_conflict");
+  if (config.connectionSettingsEnabled !== undefined && typeof config.connectionSettingsEnabled !== "boolean")
+    throw new Error("invalid_connection_settings_configuration");
+  if (config.connectionSettingsEnabled === true && (config.readOnlyCore === true || !config.queryGrafana))
+    throw new Error("connection_settings_query_configuration_required");
   if (config.readOnlyCore !== undefined && typeof config.readOnlyCore !== "boolean")
     throw new Error("invalid_read_only_core_configuration");
   if (config.readOnlyCore && [
@@ -129,12 +142,33 @@ export async function startAgentServer(config) {
   }
   const catalogScopes = catalogPolicies(config.catalogReadByActor);
   const sourcePolicies = ingestionPolicies(config.ingestionSourcesByActor);
+  function sourceContext(context) {
+    const bound = sourcePolicyContext(context, sourcePolicies);
+    // The Gateway also runs this guard immediately before sending a response.
+    context.assertActive = bound.assertActive;
+    return bound;
+  }
+  const queryConnections = queryBindings(config.queryConnections);
+  const operatorStore = config.sourceSettingsEnabled === true || config.connectionSettingsEnabled === true
+    ? await createOperatorConfigStore(configPath, (next) => {
+        ingestionPolicies(next.ingestionSourcesByActor);
+        queryBindings(next.queryConnections);
+      }, (next) => {
+        sourcePolicies.clear();
+        for (const [key, value] of ingestionPolicies(next.ingestionSourcesByActor)) sourcePolicies.set(key, value);
+        applyQueryBindings(queryConnections, next.queryConnections);
+      }) : null;
+  const sourceSettingsStore = config.sourceSettingsEnabled === true
+    ? await createSourceSettingsStore(configPath, undefined, operatorStore) : null;
+  const connectionSettingsRequest = config.connectionSettingsEnabled === true
+    ? createConnectionSettingsHost({ store: operatorStore, frontendOrigin: config.datahubOrigin, tenant: config.tenant }) : undefined;
+  const sourceSettingsRequest = sourceSettingsStore
+    ? createSourceSettingsHost({ store: sourceSettingsStore, frontendOrigin: config.datahubOrigin }) : undefined;
   const executionPolicies = fixedEtlPolicies(
     config.fixedEtlGrantsByActor,
     sourcePolicies,
   );
   const discoveryScopes = discoveryPolicies(config.discoverySourcesByActor);
-  const queryConnections = queryBindings(config.queryConnections);
   const generalQuery = config.queryGrafana !== undefined;
   if (
     generalQuery &&
@@ -335,10 +369,11 @@ export async function startAgentServer(config) {
           frontendOrigin: config.datahubOrigin,
         });
       },
+      sourceSettingsRequest,
+      connectionSettingsRequest,
       ingestionRequest: config.readOnlyCore ? undefined : (text, context) =>
         nativeIngestion(text, {
-          ...context,
-          sources: sourcePolicies.get(context.actor.key) ?? [],
+          ...sourceContext(context),
           frontendOrigin: config.datahubOrigin,
         }),
       semanticRequest: config.readOnlyCore ? undefined : (text, context) =>
@@ -347,7 +382,7 @@ export async function startAgentServer(config) {
           new SemanticError("semantic_capacity_exhausted", 429),
           () =>
             semanticHost(text, {
-              ...context,
+              ...sourceContext(context),
               runtime: {
                 state: async (sessionId) =>
                   taskRuntime(
@@ -355,7 +390,6 @@ export async function startAgentServer(config) {
                     context.assertActive,
                   ).state(sessionId),
               },
-              sources: sourcePolicies.get(context.actor.key) ?? [],
               frontendOrigin: config.datahubOrigin,
             }),
         ),
@@ -389,9 +423,8 @@ export async function startAgentServer(config) {
         }
         try {
           const host = {
-            ...context,
+            ...sourceContext(context),
             ...executionPolicies.get(context.actor.key),
-            sources: sourcePolicies.get(context.actor.key) ?? [],
             discoverySources: discoveryScopes.get(context.actor.key) ?? [],
             frontendOrigin: config.datahubOrigin,
             runtime: taskRuntime(context.runtime, context.assertActive),
@@ -433,7 +466,7 @@ if (
         dirname(path),
         config.browserAssetsDirectory,
       );
-    const running = await startAgentServer(config);
+    const running = await startAgentServer(config, { configPath: path });
     console.log(
       `DataHub Agent gateway ready on localhost:${running.server.address().port}`,
     );

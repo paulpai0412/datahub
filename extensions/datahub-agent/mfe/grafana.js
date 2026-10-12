@@ -1,3 +1,5 @@
+import { placeWorkspacePortal, validWorkspaceRect } from "./workspace-portal.js";
+
 /** Parent-owned, one-view same-site portal. No credentials, URL or actor accepted
  * from Pi. Display leases do not authorize SQL or Grafana datasource queries. */
 export function installGrafanaBridge({
@@ -23,42 +25,10 @@ export function installGrafanaBridge({
   }
   function place(entry) {
     if (!entry.element) return;
-    const r = entry.rect,
-      bounds = frame.getBoundingClientRect();
-    // Clip to both the trusted Pi frame and the actual browser viewport.
-    const left = Math.max(0, bounds.left, bounds.left + r.left);
-    const top = Math.max(0, bounds.top, bounds.top + r.top);
-    const right = Math.min(
-      window.innerWidth,
-      bounds.right,
-      bounds.left + r.left + r.width,
-    );
-    const bottom = Math.min(
-      window.innerHeight,
-      bounds.bottom,
-      bounds.top + r.top + r.height,
-    );
-    Object.assign(entry.element.style, {
-      display:
-        entry.visible && !document.hidden && right > left && bottom > top
-          ? "block"
-          : "none",
-      left: `${bounds.left + r.left}px`,
-      top: `${bounds.top + r.top}px`,
-      width: `${r.width}px`,
-      height: `${r.height}px`,
-      clipPath: `inset(${Math.max(0, top - bounds.top - r.top)}px ${Math.max(0, bounds.left + r.left + r.width - right)}px ${Math.max(0, bounds.top + r.top + r.height - bottom)}px ${Math.max(0, left - bounds.left - r.left)}px)`,
-    });
+    placeWorkspacePortal({ element: entry.element, frame, rect: entry.rect, visible: entry.visible });
   }
   function rect(value) {
-    return (
-      value &&
-      ["left", "top", "width", "height"].every(
-        (k) => Number.isFinite(value[k]) && Math.abs(value[k]) <= 20000,
-      ) &&
-      value.width > 0 &&
-      value.height > 0
-    );
+    return validWorkspaceRect(value);
   }
   async function authorize(entry) {
     try {

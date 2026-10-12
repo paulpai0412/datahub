@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { isDeepStrictEqual } from "node:util";
 import { open } from "node:fs/promises";
 import { constants } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -39,7 +40,7 @@ export function queryBindings(value = []) {
   if (!Array.isArray(value) || value.length > 128)
     throw new Error("query_configuration_invalid");
   const ids = new Set();
-  return value.map((b) => {
+  const validated = value.map((b) => {
     if (
       !exactKeys(b, [
         "id",
@@ -50,7 +51,8 @@ export function queryBindings(value = []) {
         "database",
         "datasetPrefix",
         "connectionPath",
-      ]) ||
+      ], ["enabled"]) ||
+      (b.enabled !== undefined && typeof b.enabled !== "boolean") ||
       ["id", "tenant", "environment", "database"].some(
         (k) => typeof b[k] !== "string" || !b[k] || b[k].length > 256,
       ) ||
@@ -71,8 +73,17 @@ export function queryBindings(value = []) {
     )
       throw new Error("query_configuration_invalid");
     ids.add(b.id);
-    return Object.freeze({ ...b });
+    const { enabled, ...binding } = b;
+    return { enabled: enabled !== false, binding: Object.freeze(binding) };
   });
+  return validated.filter((b) => b.enabled).map((b) => b.binding);
+}
+
+/** Keep unchanged binding identities; changing a credential path invalidates old results. */
+export function applyQueryBindings(active, configured) {
+  const next = queryBindings(configured).map((binding) =>
+    active.find((prior) => isDeepStrictEqual(prior, binding)) ?? binding);
+  active.splice(0, active.length, ...next);
 }
 
 export function resolveQueryBinding(snapshots, bindings, actor) {

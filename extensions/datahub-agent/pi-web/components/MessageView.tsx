@@ -16,6 +16,12 @@ import {
   DataHubSemanticReview,
   isSemanticReview,
 } from "./DataHubSemanticReview";
+import {
+  DataHubSemanticManagedCycle,
+  isManagedCycle,
+  isManagedScope,
+} from "./DataHubSemanticManagedCycle";
+import { DataHubSemanticMaintenance, isSemanticMaintenance } from "./DataHubSemanticMaintenance";
 import { DataHubCatalogCards } from "./DataHubCatalog";
 import { DataHubSqlCard } from "./DataHubSqlCard";
 import { DataHubDashboardDraft } from "./DataHubDashboardDraft";
@@ -1598,7 +1604,9 @@ function ToolCallBlock({
       ? result.details
       : null;
   const pluginPreview =
-    block.toolName === "datahub_etl" && !isError && isPluginPreview(result?.details)
+    block.toolName === "datahub_etl" &&
+    !isError &&
+    isPluginPreview(result?.details)
       ? result.details
       : null;
   const semanticPreview =
@@ -1612,6 +1620,13 @@ function ToolCallBlock({
     !isError &&
     isSemanticReview(result?.details)
       ? result.details
+      : null;
+  const maintenance = block.toolName === "datahub_semantic" && !isError && isSemanticMaintenance(result?.details) ? result.details : null;
+  const managedResult =
+    block.toolName === "datahub_semantic" &&
+    !isError &&
+    (isManagedScope(result?.details) || isManagedCycle(result?.details))
+      ? result!.details
       : null;
 
   if (block.toolName === "datahub_catalog") {
@@ -1781,6 +1796,8 @@ function ToolCallBlock({
       {pluginPreview && <DataHubPluginPreview preview={pluginPreview} />}
       {semanticPreview && <DataHubSemanticPreview preview={semanticPreview} />}
       {semanticReview && <DataHubSemanticReview review={semanticReview} />}
+      {managedResult && <DataHubSemanticManagedCycle result={managedResult} />}
+      {maintenance && <DataHubSemanticMaintenance result={maintenance} />}
 
       {/* ── Expanded: input args ── */}
       {expanded && (isStreamingInput || !isEditTool) && (

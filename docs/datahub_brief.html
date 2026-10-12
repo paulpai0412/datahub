@@ -1,0 +1,2141 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>DataHub 技術架構簡報｜原生平台到 Agent 擴充</title>
+    <meta
+      name="description"
+      content="10 頁簡報：DataHub 原生功能與架構、客製 Agent 能力、整合資料流及 DataHub 原生擴充資料模型。"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif+TC:wght@400&family=Noto+Sans+TC:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --paper: #f5f5f5;
+        --paper2: #ececec;
+        --ink: #2d3142;
+        --muted: #4f5d75;
+        --soft: #7a8399;
+        --rule: rgba(45, 49, 66, 0.14);
+        --accent: #eb6c36;
+        --accentTint: rgba(235, 108, 54, 0.08);
+        --link: #2e5aa8;
+        --white: #fff;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        background: #dfe3ea;
+        color: var(--ink);
+        font-family:
+          "Geist", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei",
+          sans-serif;
+      }
+      main {
+        display: grid;
+        gap: 24px;
+        padding: 24px;
+      }
+      .slide {
+        width: min(1280px, calc(100vw - 48px));
+        aspect-ratio: 16/9;
+        margin: 0 auto;
+        overflow: hidden;
+        background: var(--paper);
+        border: 1px solid rgba(45, 49, 66, 0.12);
+      }
+      svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+      }
+      .title {
+        font:
+          40px "Instrument Serif",
+          "Noto Serif TC",
+          serif;
+        fill: var(--ink);
+      }
+      .subtitle {
+        font:
+          12px "Geist Mono",
+          monospace;
+        fill: var(--soft);
+        letter-spacing: 0.08em;
+      }
+      .eyebrow {
+        font:
+          8px "Geist Mono",
+          monospace;
+        font-weight: 600;
+        fill: var(--soft);
+        letter-spacing: 0.16em;
+      }
+      .name {
+        font:
+          16px "Geist",
+          "Noto Sans TC",
+          "PingFang TC",
+          "Microsoft JhengHei",
+          sans-serif;
+        font-weight: 600;
+        fill: var(--ink);
+      }
+      .name14 {
+        font:
+          14px "Geist",
+          "Noto Sans TC",
+          "PingFang TC",
+          "Microsoft JhengHei",
+          sans-serif;
+        font-weight: 600;
+        fill: var(--ink);
+      }
+      .body {
+        font:
+          12px "Geist",
+          "Noto Sans TC",
+          "PingFang TC",
+          "Microsoft JhengHei",
+          sans-serif;
+        fill: var(--muted);
+      }
+      .small {
+        font:
+          11px "Geist",
+          "Noto Sans TC",
+          "PingFang TC",
+          "Microsoft JhengHei",
+          sans-serif;
+        fill: var(--soft);
+      }
+      .mono {
+        font:
+          10px "Geist Mono",
+          "Noto Sans Mono CJK TC",
+          monospace;
+        fill: var(--muted);
+      }
+      .tiny {
+        font:
+          8px "Geist Mono",
+          monospace;
+        fill: var(--soft);
+        letter-spacing: 0.06em;
+      }
+      .note {
+        font:
+          14px "Instrument Serif",
+          "Noto Serif TC",
+          serif;
+        font-style: italic;
+        fill: var(--muted);
+      }
+      .zone {
+        fill: rgba(45, 49, 66, 0.025);
+        stroke: rgba(45, 49, 66, 0.16);
+        stroke-width: 1;
+      }
+      .zoneLabel {
+        fill: var(--paper);
+      }
+      .box {
+        fill: #fff;
+        stroke: var(--ink);
+        stroke-width: 1.1;
+      }
+      .softBox {
+        fill: rgba(45, 49, 66, 0.04);
+        stroke: rgba(79, 93, 117, 0.48);
+        stroke-width: 1;
+      }
+      .store {
+        fill: rgba(45, 49, 66, 0.06);
+        stroke: var(--muted);
+        stroke-width: 1;
+      }
+      .external {
+        fill: rgba(45, 49, 66, 0.025);
+        stroke: rgba(45, 49, 66, 0.34);
+        stroke-width: 1;
+      }
+      .focus {
+        fill: var(--accentTint);
+        stroke: var(--accent);
+        stroke-width: 1.4;
+      }
+      .security {
+        fill: rgba(235, 108, 54, 0.045);
+        stroke: rgba(235, 108, 54, 0.58);
+        stroke-width: 1;
+        stroke-dasharray: 5 4;
+      }
+      .tag {
+        fill: none;
+        stroke: rgba(79, 93, 117, 0.45);
+        stroke-width: 0.8;
+      }
+      .tagText {
+        font:
+          8px "Geist Mono",
+          monospace;
+        font-weight: 600;
+        fill: var(--muted);
+        letter-spacing: 0.08em;
+      }
+      .flow {
+        fill: none;
+        stroke: var(--muted);
+        stroke-width: 1.2;
+      }
+      .flowAccent {
+        fill: none;
+        stroke: var(--accent);
+        stroke-width: 1.4;
+      }
+      .flowLink {
+        fill: none;
+        stroke: var(--link);
+        stroke-width: 1.2;
+      }
+      .flowDash {
+        fill: none;
+        stroke: var(--muted);
+        stroke-width: 1;
+        stroke-dasharray: 5 4;
+      }
+      .hair {
+        fill: none;
+        stroke: var(--rule);
+        stroke-width: 1;
+      }
+      .badgeDone {
+        fill: rgba(46, 90, 168, 0.08);
+        stroke: rgba(46, 90, 168, 0.35);
+        stroke-width: 1;
+      }
+      .badgeProgress {
+        fill: rgba(235, 108, 54, 0.08);
+        stroke: rgba(235, 108, 54, 0.55);
+        stroke-width: 1;
+      }
+      .badgePlan {
+        fill: rgba(45, 49, 66, 0.03);
+        stroke: rgba(79, 93, 117, 0.45);
+        stroke-width: 1;
+        stroke-dasharray: 4 3;
+      }
+      .badgeDoneText {
+        font:
+          9px "Geist Mono",
+          monospace;
+        font-weight: 600;
+        fill: var(--link);
+        letter-spacing: 0.05em;
+      }
+      .badgeProgressText {
+        font:
+          9px "Geist Mono",
+          monospace;
+        font-weight: 600;
+        fill: var(--accent);
+        letter-spacing: 0.05em;
+      }
+      .badgePlanText {
+        font:
+          9px "Geist Mono",
+          monospace;
+        font-weight: 600;
+        fill: var(--soft);
+        letter-spacing: 0.05em;
+      }
+      .footer {
+        font:
+          9px "Geist Mono",
+          monospace;
+        fill: var(--soft);
+        letter-spacing: 0.05em;
+      }
+      @media print {
+        @page {
+          size: 13.333in 7.5in;
+          margin: 0;
+        }
+        html,
+        body {
+          width: 13.333in;
+          background: #fff;
+        }
+        main {
+          display: block;
+          padding: 0;
+        }
+        .slide {
+          width: 13.333in;
+          height: 7.5in;
+          margin: 0;
+          border: 0;
+          page-break-after: always;
+          break-after: page;
+        }
+        .slide:last-child {
+          page-break-after: auto;
+          break-after: auto;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <!-- 01 / Cover and narrative -->
+      <section class="slide" aria-label="01 簡報導讀">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s01-title datahub-brief-s01-desc"
+        >
+          <title id="datahub-brief-s01-title">
+            DataHub 技術架構：原生平台到 Agent 擴充
+          </title>
+          <desc id="datahub-brief-s01-desc">
+            簡報從 DataHub 原生 Catalog 和 metadata 架構開始，逐步說明第一方
+            Agent 擴充、受控資料流和原生資料模型。
+          </desc>
+          <defs>
+            <marker
+              id="s1-arrow"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#4f5d75" />
+            </marker>
+            <marker
+              id="s1-focus"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#eb6c36" />
+            </marker>
+          </defs>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="64" y="88" class="eyebrow">
+            DATAHUB PLUGIN PLATFORM · TECHNICAL BRIEF
+          </text>
+          <text x="64" y="162" class="title" style="font-size: 48px">
+            從 Metadata Catalog
+          </text>
+          <text x="64" y="220" class="title" style="font-size: 48px">
+            到可信 Agent 工作流
+          </text>
+          <text x="68" y="264" class="body">
+            先說明原生 DataHub 的功能與架構，再看客製能力如何沿官方擴充點整合。
+          </text>
+          <text x="68" y="290" class="mono">
+            10 slides · 16:9 · Platform baseline: DataHub v1.7.0.1
+          </text>
+          <rect
+            x="64"
+            y="356"
+            width="1152"
+            height="1"
+            fill="rgba(45,49,66,.16)"
+          />
+          <g data-block-id="s01-native">
+            <rect x="64" y="402" width="326" height="144" rx="8" class="box" />
+            <text x="88" y="432" class="eyebrow">01 — 04 / NATIVE DATAHUB</text>
+            <text x="88" y="472" class="name">
+              Catalog · Metadata · Lineage
+            </text>
+            <text x="88" y="500" class="body">
+              既有實體、Aspect、搜尋與治理面。
+            </text>
+            <text x="88" y="524" class="mono">CORE REMAINS UNMODIFIED</text>
+          </g>
+          <path d="M390 474 H434" class="flow" marker-end="url(#s1-arrow)" />
+          <g data-block-id="s01-extension">
+            <rect
+              x="434"
+              y="402"
+              width="326"
+              height="144"
+              rx="8"
+              class="focus"
+            />
+            <text x="458" y="432" class="eyebrow">
+              05 / CUSTOM CAPABILITIES
+            </text>
+            <text x="458" y="472" class="name">
+              Agent · MCP · Semantic Steward
+            </text>
+            <text x="458" y="500" class="body">
+              以第一方 MFE 與可信 Host 補足流程。
+            </text>
+            <text x="458" y="524" class="mono">
+              VERIFIED / IN-PROGRESS SHOWN
+            </text>
+          </g>
+          <path
+            d="M760 474 H804"
+            class="flowAccent"
+            marker-end="url(#s1-focus)"
+          />
+          <g data-block-id="s01-integration">
+            <rect
+              x="804"
+              y="402"
+              width="412"
+              height="144"
+              rx="8"
+              class="store"
+            />
+            <text x="828" y="432" class="eyebrow">
+              06 — 10 / INTEGRATED CONTRACT
+            </text>
+            <text x="828" y="472" class="name">
+              Identity → Scope → Review → Readback
+            </text>
+            <text x="828" y="500" class="body">
+              資料流與模型落在 DataHub 原生 records / API。
+            </text>
+            <text x="828" y="524" class="mono">
+              NO CORE FORK · NO NEW DATASTORE
+            </text>
+          </g>
+          <line x1="64" y1="638" x2="1216" y2="638" class="hair" />
+          <text x="64" y="666" class="footer">
+            ARCHITECTURE FIRST · EXTENSION SECOND · TRUST BOUNDARIES THROUGHOUT
+          </text>
+          <text x="1216" y="666" text-anchor="end" class="footer">01 / 10</text>
+        </svg>
+      </section>
+
+      <!-- 02 / Native capabilities -->
+      <section class="slide" aria-label="02 原生 DataHub 功能">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s02-title datahub-brief-s02-desc"
+        >
+          <title id="datahub-brief-s02-title">原生 DataHub 的功能版圖</title>
+          <desc id="datahub-brief-s02-desc">
+            DataHub 原生能力涵蓋 metadata ingestion、Catalog discovery、lineage
+            關係與 governance；核心管理的是 metadata，不是來源業務資料列。
+          </desc>
+          <defs>
+            <marker
+              id="s2-arrow"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#4f5d75" />
+            </marker>
+          </defs>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="48" y="62" class="title">
+            原生 DataHub：企業 Metadata Catalog
+          </text>
+          <text x="48" y="88" class="subtitle">
+            02 / NATIVE CAPABILITIES · COLLECT → DISCOVER → UNDERSTAND → GOVERN
+          </text>
+          <g data-block-id="s02-flow">
+            <path d="M330 300 H360" class="flow" marker-end="url(#s2-arrow)" />
+            <path d="M620 300 H650" class="flow" marker-end="url(#s2-arrow)" />
+            <path d="M910 300 H940" class="flow" marker-end="url(#s2-arrow)" />
+          </g>
+          <g data-block-id="s02-collect">
+            <rect x="64" y="190" width="266" height="220" rx="8" class="box" />
+            <rect x="84" y="210" width="70" height="16" rx="2" class="tag" />
+            <text x="119" y="221" text-anchor="middle" class="tagText">
+              INGEST
+            </text>
+            <text x="84" y="262" class="name">盤點來源 Metadata</text>
+            <text x="84" y="296" class="body">
+              官方 connectors / CLI 讀取 schema、
+            </text>
+            <text x="84" y="318" class="body">欄位、owners 與來源描述。</text>
+            <line x1="84" y1="344" x2="310" y2="344" class="hair" />
+            <text x="84" y="372" class="mono">SOURCE → METADATA CHANGE</text>
+          </g>
+          <g data-block-id="s02-discover">
+            <rect
+              x="360"
+              y="190"
+              width="260"
+              height="220"
+              rx="8"
+              class="softBox"
+            />
+            <rect x="380" y="210" width="74" height="16" rx="2" class="tag" />
+            <text x="417" y="221" text-anchor="middle" class="tagText">
+              CATALOG
+            </text>
+            <text x="380" y="262" class="name">搜尋與資產檢視</text>
+            <text x="380" y="296" class="body">
+              按平台、來源、Domain 與名稱
+            </text>
+            <text x="380" y="318" class="body">
+              探索 Dataset / Dashboard 等資產。
+            </text>
+            <line x1="380" y1="344" x2="598" y2="344" class="hair" />
+            <text x="380" y="372" class="mono">ENTITY PROFILE · SEARCH</text>
+          </g>
+          <g data-block-id="s02-understand">
+            <rect
+              x="650"
+              y="190"
+              width="260"
+              height="220"
+              rx="8"
+              class="softBox"
+            />
+            <rect x="670" y="210" width="78" height="16" rx="2" class="tag" />
+            <text x="709" y="221" text-anchor="middle" class="tagText">
+              RELATION
+            </text>
+            <text x="670" y="262" class="name">Schema 與 Lineage</text>
+            <text x="670" y="296" class="body">呈現欄位結構、上下游依賴與</text>
+            <text x="670" y="318" class="body">可取得的欄位級 mapping。</text>
+            <line x1="670" y1="344" x2="888" y2="344" class="hair" />
+            <text x="670" y="372" class="mono">GRAPH · FIELD MAPPING</text>
+          </g>
+          <g data-block-id="s02-govern">
+            <rect
+              x="940"
+              y="190"
+              width="276"
+              height="220"
+              rx="8"
+              class="focus"
+            />
+            <rect x="960" y="210" width="76" height="16" rx="2" class="tag" />
+            <text x="998" y="221" text-anchor="middle" class="tagText">
+              GOVERN
+            </text>
+            <text x="960" y="262" class="name">治理與責任脈絡</text>
+            <text x="960" y="296" class="body">
+              Owners、Tags、Terms、Domains、
+            </text>
+            <text x="960" y="318" class="body">Policies 與變更歷史。</text>
+            <line x1="960" y1="344" x2="1194" y2="344" class="hair" />
+            <text x="960" y="372" class="mono">ACL · AUDIT · OWNERSHIP</text>
+          </g>
+          <rect x="64" y="468" width="1152" height="92" rx="8" class="zone" />
+          <text x="88" y="500" class="eyebrow">BOUNDARY</text>
+          <text x="88" y="532" class="name14">
+            DataHub 管理
+            metadata；不等於搬移整庫業務資料，也不自動授予來源資料列的 SELECT
+            權限。
+          </text>
+          <line x1="48" y1="638" x2="1232" y2="638" class="hair" />
+          <text x="48" y="666" class="footer">
+            NATIVE DATAHUB · SOURCE ACCESS AND CATALOG ACCESS ARE DISTINCT
+          </text>
+          <text x="1232" y="666" text-anchor="end" class="footer">02 / 10</text>
+        </svg>
+      </section>
+
+      <!-- 03 / Native architecture -->
+      <section class="slide" aria-label="03 原生 DataHub 架構">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s03-title datahub-brief-s03-desc"
+        >
+          <title id="datahub-brief-s03-title">
+            原生 DataHub 部署與服務架構
+          </title>
+          <desc id="datahub-brief-s03-desc">
+            來源 connector 將 metadata 送入 DataHub GMS；前端經公開 API
+            查詢，GMS 將資料持久化至 MySQL 並發布 metadata events 到
+            Kafka，再供搜尋索引更新 OpenSearch。
+          </desc>
+          <defs>
+            <marker
+              id="s3-arrow"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#4f5d75" />
+            </marker>
+            <marker
+              id="s3-link"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#2e5aa8" />
+            </marker>
+          </defs>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="48" y="62" class="title">
+            原生架構：Ingestion、GMS 與儲存／搜尋
+          </text>
+          <text x="48" y="88" class="subtitle">
+            03 / NATIVE DEPLOYMENT · PINNED LOCAL BASELINE
+          </text>
+          <rect x="48" y="134" width="1184" height="430" rx="8" class="zone" />
+          <rect
+            x="60"
+            y="138"
+            width="186"
+            height="14"
+            rx="2"
+            class="zoneLabel"
+          />
+          <text x="153" y="148" text-anchor="middle" class="eyebrow">
+            DATAHUB PLATFORM
+          </text>
+          <g data-block-id="s03-connectors">
+            <path d="M224 324 H312" class="flow" marker-end="url(#s3-arrow)" />
+            <path d="M484 324 H524" class="flow" marker-end="url(#s3-arrow)" />
+            <path
+              d="M694 296 H758 V238 H814"
+              class="flow"
+              marker-end="url(#s3-arrow)"
+            />
+            <path
+              d="M609 210 V274"
+              class="flowLink"
+              marker-end="url(#s3-link)"
+            />
+            <path d="M609 378 V450" class="flow" marker-end="url(#s3-arrow)" />
+            <path
+              d="M984 233 H986 Q994 233 994 241 V374 H1000"
+              class="flow"
+              marker-end="url(#s3-arrow)"
+            />
+          </g>
+          <g data-block-id="s03-source">
+            <rect
+              x="72"
+              y="284"
+              width="152"
+              height="80"
+              rx="6"
+              class="external"
+            />
+            <rect x="84" y="292" width="54" height="14" rx="2" class="tag" />
+            <text x="111" y="302" text-anchor="middle" class="tagText">
+              SOURCES
+            </text>
+            <text x="148" y="328" text-anchor="middle" class="name14">
+              DB / BI / Files
+            </text>
+            <text x="148" y="348" text-anchor="middle" class="mono">
+              metadata scope
+            </text>
+          </g>
+          <g data-block-id="s03-ingest">
+            <rect x="312" y="284" width="172" height="80" rx="6" class="box" />
+            <rect x="324" y="292" width="54" height="14" rx="2" class="tag" />
+            <text x="351" y="302" text-anchor="middle" class="tagText">
+              INGEST
+            </text>
+            <text x="398" y="328" text-anchor="middle" class="name14">
+              Connectors / CLI
+            </text>
+            <text x="398" y="348" text-anchor="middle" class="mono">
+              recipe · execution
+            </text>
+          </g>
+          <g data-block-id="s03-gms">
+            <rect
+              x="524"
+              y="274"
+              width="170"
+              height="104"
+              rx="8"
+              class="focus"
+            />
+            <rect x="540" y="284" width="42" height="14" rx="2" class="tag" />
+            <text x="561" y="294" text-anchor="middle" class="tagText">
+              GMS
+            </text>
+            <text x="609" y="316" text-anchor="middle" class="name14">
+              Metadata Service
+            </text>
+            <text x="609" y="340" text-anchor="middle" class="body">
+              GraphQL / OpenAPI
+            </text>
+            <text x="609" y="360" text-anchor="middle" class="mono">
+              entities · aspects
+            </text>
+          </g>
+          <g data-block-id="s03-kafka">
+            <rect
+              x="814"
+              y="190"
+              width="170"
+              height="86"
+              rx="6"
+              class="store"
+            />
+            <rect x="826" y="198" width="64" height="14" rx="2" class="tag" />
+            <text x="858" y="208" text-anchor="middle" class="tagText">
+              EVENT BUS
+            </text>
+            <text x="899" y="234" text-anchor="middle" class="name14">
+              Kafka
+            </text>
+            <text x="899" y="254" text-anchor="middle" class="mono">
+              metadata events
+            </text>
+          </g>
+          <g data-block-id="s03-search">
+            <rect
+              x="1000"
+              y="332"
+              width="196"
+              height="84"
+              rx="6"
+              class="store"
+            />
+            <rect x="1016" y="340" width="58" height="14" rx="2" class="tag" />
+            <text x="1045" y="350" text-anchor="middle" class="tagText">
+              INDEX
+            </text>
+            <text x="1098" y="376" text-anchor="middle" class="name14">
+              OpenSearch
+            </text>
+            <text x="1098" y="396" text-anchor="middle" class="mono">
+              search / discovery
+            </text>
+          </g>
+          <g data-block-id="s03-mysql">
+            <rect
+              x="524"
+              y="450"
+              width="170"
+              height="76"
+              rx="6"
+              class="store"
+            />
+            <rect x="540" y="458" width="52" height="14" rx="2" class="tag" />
+            <text x="566" y="468" text-anchor="middle" class="tagText">
+              STORE
+            </text>
+            <text x="609" y="490" text-anchor="middle" class="name14">
+              MySQL
+            </text>
+            <text x="609" y="510" text-anchor="middle" class="mono">
+              relational metadata
+            </text>
+          </g>
+          <g data-block-id="s03-ui">
+            <rect x="524" y="142" width="170" height="68" rx="6" class="box" />
+            <rect x="540" y="150" width="50" height="14" rx="2" class="tag" />
+            <text x="565" y="160" text-anchor="middle" class="tagText">
+              FRONTEND
+            </text>
+            <text x="609" y="182" text-anchor="middle" class="name14">
+              DataHub UI
+            </text>
+            <text x="609" y="200" text-anchor="middle" class="mono">
+              catalog · governance
+            </text>
+          </g>
+          <text x="72" y="592" class="body">
+            固定基準：Core v1.7.0.1、映像 digest 鎖定；Compose 另有 Actions 與
+            system-update 輔助服務（此圖聚焦核心資料路徑）。
+          </text>
+          <line x1="48" y1="638" x2="1232" y2="638" class="hair" />
+          <text x="48" y="666" class="footer">
+            SERVICE ROLES ARE DISTINCT · GMS IS THE PUBLIC METADATA SERVICE
+            BOUNDARY
+          </text>
+          <text x="1232" y="666" text-anchor="end" class="footer">03 / 10</text>
+        </svg>
+      </section>
+
+      <!-- 04 / Native data model -->
+      <section class="slide" aria-label="04 原生資料模型">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s04-title datahub-brief-s04-desc"
+        >
+          <title id="datahub-brief-s04-title">
+            原生 DataHub Metadata 資料模型
+          </title>
+          <desc id="datahub-brief-s04-desc">
+            DataHub 以 URN 識別 Entity，透過可版本化 Aspect 描述資產屬性，並以
+            relationship、lineage edge 與 metadata events 連接和追蹤變更。
+          </desc>
+          <defs>
+            <marker
+              id="s4-arrow"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#4f5d75" />
+            </marker>
+            <marker
+              id="s4-link"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#2e5aa8" />
+            </marker>
+          </defs>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="48" y="62" class="title">
+            原生資料模型：Entity + Aspect + Relationship
+          </text>
+          <text x="48" y="88" class="subtitle">
+            04 / METADATA MODEL · URN-IDENTIFIED AND VERSIONED
+          </text>
+          <g data-block-id="s04-relations">
+            <path d="M366 272 H430" class="flow" marker-end="url(#s4-arrow)" />
+            <path d="M684 272 H748" class="flow" marker-end="url(#s4-arrow)" />
+            <path
+              d="M554 378 V438"
+              class="flowLink"
+              marker-end="url(#s4-link)"
+            />
+            <path d="M875 330 V438" class="flow" marker-end="url(#s4-arrow)" />
+          </g>
+          <g data-block-id="s04-source">
+            <rect
+              x="72"
+              y="222"
+              width="294"
+              height="100"
+              rx="6"
+              class="external"
+            />
+            <rect x="88" y="234" width="74" height="14" rx="2" class="tag" />
+            <text x="125" y="244" text-anchor="middle" class="tagText">
+              IDENTITY
+            </text>
+            <text x="88" y="278" class="name">Entity URN</text>
+            <text x="88" y="302" class="mono">
+              platform + native asset identity
+            </text>
+          </g>
+          <g data-block-id="s04-entity">
+            <rect
+              x="430"
+              y="194"
+              width="254"
+              height="156"
+              rx="8"
+              class="focus"
+            />
+            <rect x="448" y="208" width="60" height="14" rx="2" class="tag" />
+            <text x="478" y="218" text-anchor="middle" class="tagText">
+              ENTITY
+            </text>
+            <text x="448" y="256" class="name">Dataset</text>
+            <text x="448" y="282" class="mono">
+              urn:li:dataset:(urn:li:dataPlatform:&lt;platform&gt;,&lt;name&gt;,&lt;env&gt;)
+            </text>
+            <line x1="448" y1="300" x2="666" y2="300" class="hair" />
+            <text x="448" y="326" class="small">
+              logical asset, not business row
+            </text>
+          </g>
+          <g data-block-id="s04-aspects">
+            <rect x="748" y="178" width="448" height="188" rx="8" class="box" />
+            <rect x="768" y="194" width="66" height="14" rx="2" class="tag" />
+            <text x="801" y="204" text-anchor="middle" class="tagText">
+              ASPECTS
+            </text>
+            <text x="768" y="240" class="name14">DatasetProperties</text>
+            <text x="1004" y="240" class="body">
+              description · custom properties
+            </text>
+            <text x="768" y="272" class="name14">SchemaMetadata</text>
+            <text x="1004" y="272" class="body">
+              fields · type · native path
+            </text>
+            <text x="768" y="304" class="name14">
+              Ownership / Tags / Domains
+            </text>
+            <text x="768" y="336" class="name14">EditableSchemaMetadata</text>
+          </g>
+          <g data-block-id="s04-relationships">
+            <rect
+              x="430"
+              y="438"
+              width="254"
+              height="92"
+              rx="6"
+              class="store"
+            />
+            <rect x="448" y="450" width="76" height="14" rx="2" class="tag" />
+            <text x="486" y="460" text-anchor="middle" class="tagText">
+              RELATION
+            </text>
+            <text x="448" y="490" class="name14">DataFlow / DataJob</text>
+            <text x="448" y="512" class="mono">ownership · execution</text>
+            <rect
+              x="748"
+              y="438"
+              width="448"
+              height="92"
+              rx="6"
+              class="softBox"
+            />
+            <rect x="768" y="450" width="82" height="14" rx="2" class="tag" />
+            <text x="809" y="460" text-anchor="middle" class="tagText">
+              LINEAGE
+            </text>
+            <text x="768" y="490" class="name14">
+              Dataset → Dataset / Field mapping
+            </text>
+            <text x="768" y="512" class="mono">
+              dependency graph · not a Join approval
+            </text>
+          </g>
+          <rect x="72" y="438" width="294" height="92" rx="6" class="zone" />
+          <text x="96" y="470" class="eyebrow">CHANGE HISTORY</text>
+          <text x="96" y="500" class="name14">Aspect versions + events</text>
+          <text x="96" y="520" class="small">API writes remain auditable</text>
+          <line x1="48" y1="638" x2="1232" y2="638" class="hair" />
+          <text x="48" y="666" class="footer">
+            MODEL RULE · REUSE NATIVE ENTITIES AND ASPECTS BEFORE ADDING CUSTOM
+            ONES
+          </text>
+          <text x="1232" y="666" text-anchor="end" class="footer">04 / 10</text>
+        </svg>
+      </section>
+
+      <!-- 05 / Custom features -->
+      <section class="slide" aria-label="05 客製功能與能力">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s05-title datahub-brief-s05-desc"
+        >
+          <title id="datahub-brief-s05-title">客製功能與 Agent 能力</title>
+          <desc id="datahub-brief-s05-desc">
+            第一方擴充在 DataHub Agent 中提供 DataHub MCP 查詢、Catalog Explorer
+            與 Semantic Steward；每項能力標示已驗證、進行中或尚待驗收。
+          </desc>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="48" y="62" class="title">
+            客製功能：把 Agent 接到 Metadata 工作流
+          </text>
+          <text x="48" y="88" class="subtitle">
+            05 / CUSTOM CAPABILITIES · STATUS IS PART OF THE ARCHITECTURE
+          </text>
+          <g data-block-id="s05-agent">
+            <rect
+              x="64"
+              y="154"
+              width="352"
+              height="194"
+              rx="8"
+              class="focus"
+            />
+            <rect x="84" y="174" width="70" height="16" rx="2" class="tag" />
+            <text x="119" y="185" text-anchor="middle" class="tagText">
+              AGENT + MCP
+            </text>
+            <text x="84" y="226" class="name">自然語言 Metadata 查詢</text>
+            <text x="84" y="258" class="body">
+              依 actor ACL 讀取 schema、資產與 lineage，
+            </text>
+            <text x="84" y="280" class="body">
+              再以證據回答；不把來源資料列當預設輸入。
+            </text>
+            <rect
+              x="84"
+              y="308"
+              width="202"
+              height="20"
+              rx="4"
+              class="badgeDone"
+            />
+            <text x="185" y="322" text-anchor="middle" class="badgeDoneText">
+              T02 LIVE E2E · 2026-09-12
+            </text>
+          </g>
+          <g data-block-id="s05-catalog">
+            <rect x="464" y="154" width="352" height="194" rx="8" class="box" />
+            <rect x="484" y="174" width="92" height="16" rx="2" class="tag" />
+            <text x="530" y="185" text-anchor="middle" class="tagText">
+              CATALOG UI
+            </text>
+            <text x="484" y="226" class="name">Catalog Explorer</text>
+            <text x="484" y="258" class="body">
+              八類資產卡片、欄位檢視、欄位 lineage、
+            </text>
+            <text x="484" y="280" class="body">原生權限下的查詢與追問。</text>
+            <rect
+              x="484"
+              y="308"
+              width="176"
+              height="20"
+              rx="4"
+              class="badgeProgress"
+            />
+            <text
+              x="572"
+              y="322"
+              text-anchor="middle"
+              class="badgeProgressText"
+            >
+              LOCAL IMPLEMENTATION
+            </text>
+          </g>
+          <g data-block-id="s05-steward">
+            <rect x="864" y="154" width="352" height="194" rx="8" class="box" />
+            <rect x="884" y="174" width="100" height="16" rx="2" class="tag" />
+            <text x="934" y="185" text-anchor="middle" class="tagText">
+              SEMANTIC
+            </text>
+            <text x="884" y="226" class="name">Semantic Steward</text>
+            <text x="884" y="258" class="body">
+              證據化語義差異、人工 review、條件寫入，
+            </text>
+            <text x="884" y="280" class="body">
+              並從 DataHub 讀回核對結果。
+            </text>
+            <rect
+              x="884"
+              y="308"
+              width="150"
+              height="20"
+              rx="4"
+              class="badgeDone"
+            />
+            <text x="959" y="322" text-anchor="middle" class="badgeDoneText">
+              S1–S3 VERIFIED
+            </text>
+          </g>
+          <g data-block-id="s05-shared">
+            <rect
+              x="64"
+              y="390"
+              width="1152"
+              height="160"
+              rx="8"
+              class="zone"
+            />
+            <text x="88" y="424" class="eyebrow">
+              SHARED HOST RESPONSIBILITIES
+            </text>
+            <rect
+              x="88"
+              y="450"
+              width="250"
+              height="68"
+              rx="6"
+              class="softBox"
+            />
+            <text x="108" y="480" class="name14">身份與來源 Scope</text>
+            <text x="108" y="502" class="mono">me · source · asset ACL</text>
+            <rect
+              x="372"
+              y="450"
+              width="250"
+              height="68"
+              rx="6"
+              class="softBox"
+            />
+            <text x="392" y="480" class="name14">MCP / Skill Contract</text>
+            <text x="392" y="502" class="mono">
+              typed tools · bounded output
+            </text>
+            <rect
+              x="656"
+              y="450"
+              width="250"
+              height="68"
+              rx="6"
+              class="security"
+            />
+            <text x="676" y="480" class="name14">Human Review / CAS</text>
+            <text x="676" y="502" class="mono">model cannot approve</text>
+            <rect
+              x="940"
+              y="450"
+              width="250"
+              height="68"
+              rx="6"
+              class="store"
+            />
+            <text x="960" y="480" class="name14">
+              Native Task / Run / Decision
+            </text>
+            <text x="960" y="502" class="mono">versioned history</text>
+          </g>
+          <text x="64" y="594" class="body">
+            界線：Catalog 的 29 項 adapter read 有真資料證據；B1/B2 的完整
+            Agent/browser 驗收尚未完成。SQL execution 與 ETL
+            自動化不在已驗證能力內。
+          </text>
+          <line x1="48" y1="638" x2="1232" y2="638" class="hair" />
+          <text x="48" y="666" class="footer">
+            DELIVERY STATUS · LIVE EVIDENCE ≠ FIXTURE COVERAGE ≠ PRODUCT
+            ACCEPTANCE
+          </text>
+          <text x="1232" y="666" text-anchor="end" class="footer">05 / 10</text>
+        </svg>
+      </section>
+
+      <!-- 06 / Integrated architecture -->
+      <section class="slide" aria-label="06 整合後架構">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s06-title datahub-brief-s06-desc"
+        >
+          <title id="datahub-brief-s06-title">
+            整合後架構：官方 Core 加上第一方 Agent Plugin
+          </title>
+          <desc id="datahub-brief-s06-desc">
+            DataHub 左側只增加 Agent MFE 入口，透過隔離的 pi-web runtime 和可信
+            Host adapter 使用 DataHub 公開 API 與原生資料模型，官方 Core
+            不修改。
+          </desc>
+          <defs>
+            <marker
+              id="s6-arrow"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#4f5d75" />
+            </marker>
+            <marker
+              id="s6-focus"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#eb6c36" />
+            </marker>
+            <marker
+              id="s6-link"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#2e5aa8" />
+            </marker>
+          </defs>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="48" y="62" class="title">
+            整合架構：Core 不動，擴充放在 Plugin
+          </text>
+          <text x="48" y="88" class="subtitle">
+            06 / INTEGRATED ARCHITECTURE · PUBLIC CONTRACTS + TRUSTED HOST
+          </text>
+          <rect x="48" y="132" width="274" height="422" rx="8" class="zone" />
+          <rect x="346" y="132" width="548" height="422" rx="8" class="focus" />
+          <rect x="918" y="132" width="314" height="422" rx="8" class="zone" />
+          <rect
+            x="60"
+            y="136"
+            width="98"
+            height="14"
+            rx="2"
+            class="zoneLabel"
+          />
+          <text x="109" y="146" text-anchor="middle" class="eyebrow">
+            DATAHUB
+          </text>
+          <rect
+            x="358"
+            y="136"
+            width="138"
+            height="14"
+            rx="2"
+            class="zoneLabel"
+          />
+          <text x="427" y="146" text-anchor="middle" class="eyebrow">
+            FIRST-PARTY EXTENSION
+          </text>
+          <rect
+            x="930"
+            y="136"
+            width="126"
+            height="14"
+            rx="2"
+            class="zoneLabel"
+          />
+          <text x="993" y="146" text-anchor="middle" class="eyebrow">
+            CONTROLLED SERVICES
+          </text>
+          <g data-block-id="s06-flows">
+            <path
+              d="M284 236 H326 Q334 236 334 244 V236 H390"
+              class="flowAccent"
+              marker-end="url(#s6-focus)"
+            />
+            <path
+              d="M284 408 H326 Q334 408 334 396 V380 H390"
+              class="flow"
+              marker-end="url(#s6-arrow)"
+            />
+            <path
+              d="M600 290 V316"
+              class="flowAccent"
+              marker-end="url(#s6-focus)"
+            />
+            <path
+              d="M804 360 H858 Q866 360 866 348 V240 H946"
+              class="flowLink"
+              marker-end="url(#s6-link)"
+            />
+            <path
+              d="M804 398 H858 Q866 398 866 408 V432 H946"
+              class="flow"
+              marker-end="url(#s6-arrow)"
+            />
+          </g>
+          <g data-block-id="s06-native">
+            <rect x="76" y="196" width="208" height="80" rx="6" class="box" />
+            <rect x="90" y="204" width="44" height="14" rx="2" class="tag" />
+            <text x="112" y="214" text-anchor="middle" class="tagText">
+              MFE
+            </text>
+            <text x="180" y="240" text-anchor="middle" class="name14">
+              Agent 左側入口
+            </text>
+            <text x="180" y="260" text-anchor="middle" class="mono">
+              /mfe/agent
+            </text>
+            <rect x="76" y="368" width="208" height="80" rx="6" class="store" />
+            <rect x="90" y="376" width="52" height="14" rx="2" class="tag" />
+            <text x="116" y="386" text-anchor="middle" class="tagText">
+              CORE
+            </text>
+            <text x="180" y="412" text-anchor="middle" class="name14">
+              Frontend + GMS
+            </text>
+            <text x="180" y="432" text-anchor="middle" class="mono">
+              fixed upstream DataHub
+            </text>
+          </g>
+          <g data-block-id="s06-piweb">
+            <rect
+              x="390"
+              y="190"
+              width="414"
+              height="100"
+              rx="8"
+              class="focus"
+            />
+            <rect x="408" y="202" width="70" height="14" rx="2" class="tag" />
+            <text x="443" y="212" text-anchor="middle" class="tagText">
+              PI-WEB
+            </text>
+            <text x="597" y="242" text-anchor="middle" class="name">
+              Agent UI + Session Runtime
+            </text>
+            <text x="597" y="266" text-anchor="middle" class="mono">
+              chat · models · skills · MCP · files
+            </text>
+          </g>
+          <g data-block-id="s06-host">
+            <rect
+              x="390"
+              y="316"
+              width="414"
+              height="112"
+              rx="8"
+              class="security"
+            />
+            <rect x="408" y="328" width="54" height="14" rx="2" class="tag" />
+            <text x="435" y="338" text-anchor="middle" class="tagText">
+              HOST
+            </text>
+            <text x="597" y="368" text-anchor="middle" class="name">
+              Identity · Scope · Review · Readback
+            </text>
+            <text x="597" y="394" text-anchor="middle" class="body">
+              依當前 DataHub actor 與 ACL 驗證每次操作
+            </text>
+            <text x="597" y="414" text-anchor="middle" class="mono">
+              model/runtime receives no approval credential
+            </text>
+          </g>
+          <g data-block-id="s06-runtime">
+            <rect
+              x="390"
+              y="464"
+              width="414"
+              height="56"
+              rx="6"
+              class="store"
+            />
+            <text x="597" y="489" text-anchor="middle" class="name14">
+              Per-actor isolated runtime
+            </text>
+            <text x="597" y="508" text-anchor="middle" class="mono">
+              scoped egress · no host home / Docker socket
+            </text>
+          </g>
+          <g data-block-id="s06-services">
+            <rect x="946" y="196" width="224" height="88" rx="6" class="box" />
+            <rect x="960" y="204" width="72" height="14" rx="2" class="tag" />
+            <text x="996" y="214" text-anchor="middle" class="tagText">
+              PUBLIC API
+            </text>
+            <text x="1058" y="240" text-anchor="middle" class="name14">
+              GraphQL / OpenAPI
+            </text>
+            <text x="1058" y="260" text-anchor="middle" class="mono">
+              native entities / aspects
+            </text>
+            <rect
+              x="946"
+              y="388"
+              width="224"
+              height="88"
+              rx="6"
+              class="store"
+            />
+            <rect x="960" y="396" width="58" height="14" rx="2" class="tag" />
+            <text x="989" y="406" text-anchor="middle" class="tagText">
+              NATIVE
+            </text>
+            <text x="1058" y="432" text-anchor="middle" class="name14">
+              Task / Run / Decision
+            </text>
+            <text x="1058" y="452" text-anchor="middle" class="mono">
+              versioned audit record
+            </text>
+          </g>
+          <text x="48" y="594" class="body">
+            部署現況與架構能力分開驗收：MFE／MCP 曾完成 live
+            evidence；多瀏覽器生命週期、完整 Catalog UI 與 ingestion 閉環仍有
+            gate。
+          </text>
+          <line x1="48" y1="638" x2="1232" y2="638" class="hair" />
+          <text x="48" y="666" class="footer">
+            EXTENSION PRINCIPLE · NO CORE PATCH · NO CUSTOM BUSINESS DATABASE
+          </text>
+          <text x="1232" y="666" text-anchor="end" class="footer">06 / 10</text>
+        </svg>
+      </section>
+
+      <!-- 07 / Integrated data flow -->
+      <section class="slide" aria-label="07 整合資料流">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s07-title datahub-brief-s07-desc"
+        >
+          <title id="datahub-brief-s07-title">
+            整合後的 Metadata 查詢與語義發布資料流
+          </title>
+          <desc id="datahub-brief-s07-desc">
+            資料來源由原生 ingestion 將 metadata 寫入 DataHub；Agent
+            以使用者身分讀取 metadata，Host
+            審核通過後才以版本條件寫入並讀回精確的語義 Aspect。
+          </desc>
+          <defs>
+            <marker
+              id="s7-read"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#2e5aa8" />
+            </marker>
+            <marker
+              id="s7-write"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#eb6c36" />
+            </marker>
+            <marker
+              id="s7-muted"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#4f5d75" />
+            </marker>
+          </defs>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="48" y="62" class="title">
+            整合資料流：讀取與寫入走不同信任路徑
+          </text>
+          <text x="48" y="88" class="subtitle">
+            07 / DATA FLOW · METADATA-ONLY INGESTION, ACTOR-SCOPED READ,
+            HUMAN-GATED WRITE
+          </text>
+          <rect x="56" y="142" width="1168" height="174" rx="8" class="zone" />
+          <rect
+            x="68"
+            y="146"
+            width="126"
+            height="14"
+            rx="2"
+            class="zoneLabel"
+          />
+          <text x="131" y="156" text-anchor="middle" class="eyebrow">
+            READ / DISCOVERY
+          </text>
+          <rect x="56" y="348" width="1168" height="214" rx="8" class="zone" />
+          <rect
+            x="68"
+            y="352"
+            width="160"
+            height="14"
+            rx="2"
+            class="zoneLabel"
+          />
+          <text x="148" y="362" text-anchor="middle" class="eyebrow">
+            PROPOSAL / PUBLICATION
+          </text>
+          <g data-block-id="s07-read-flow">
+            <path
+              d="M214 230 H264"
+              class="flowLink"
+              marker-end="url(#s7-read)"
+            />
+            <path
+              d="M426 230 H476"
+              class="flowLink"
+              marker-end="url(#s7-read)"
+            />
+            <path
+              d="M638 230 H688"
+              class="flowLink"
+              marker-end="url(#s7-read)"
+            />
+            <path
+              d="M850 230 H900"
+              class="flowLink"
+              marker-end="url(#s7-read)"
+            />
+            <path
+              d="M1062 230 H1112"
+              class="flowLink"
+              marker-end="url(#s7-read)"
+            />
+          </g>
+          <g data-block-id="s07-read-nodes">
+            <rect
+              x="64"
+              y="192"
+              width="150"
+              height="76"
+              rx="6"
+              class="external"
+            />
+            <text x="139" y="222" text-anchor="middle" class="name14">
+              來源系統
+            </text>
+            <text x="139" y="246" text-anchor="middle" class="mono">
+              schema only
+            </text>
+            <rect x="264" y="192" width="162" height="76" rx="6" class="box" />
+            <text x="345" y="222" text-anchor="middle" class="name14">
+              Native Ingestion
+            </text>
+            <text x="345" y="246" text-anchor="middle" class="mono">
+              approved scope
+            </text>
+            <rect
+              x="476"
+              y="192"
+              width="162"
+              height="76"
+              rx="6"
+              class="store"
+            />
+            <text x="557" y="222" text-anchor="middle" class="name14">
+              DataHub Catalog
+            </text>
+            <text x="557" y="246" text-anchor="middle" class="mono">
+              entity / aspect
+            </text>
+            <rect x="688" y="192" width="162" height="76" rx="6" class="box" />
+            <text x="769" y="222" text-anchor="middle" class="name14">
+              MCP / Host read
+            </text>
+            <text x="769" y="246" text-anchor="middle" class="mono">
+              actor ACL checked
+            </text>
+            <rect
+              x="900"
+              y="192"
+              width="162"
+              height="76"
+              rx="6"
+              class="focus"
+            />
+            <text x="981" y="222" text-anchor="middle" class="name14">
+              Agent evidence
+            </text>
+            <text x="981" y="246" text-anchor="middle" class="mono">
+              bounded projection
+            </text>
+            <rect
+              x="1112"
+              y="192"
+              width="96"
+              height="76"
+              rx="6"
+              class="external"
+            />
+            <text x="1160" y="222" text-anchor="middle" class="name14">
+              回答
+            </text>
+            <text x="1160" y="246" text-anchor="middle" class="mono">
+              as_of
+            </text>
+          </g>
+          <g data-block-id="s07-write-flow">
+            <path
+              d="M250 450 H302"
+              class="flowAccent"
+              marker-end="url(#s7-write)"
+            />
+            <path
+              d="M480 450 H532"
+              class="flowAccent"
+              marker-end="url(#s7-write)"
+            />
+            <path
+              d="M710 450 H762"
+              class="flowAccent"
+              marker-end="url(#s7-write)"
+            />
+            <path d="M940 450 H992" class="flow" marker-end="url(#s7-muted)" />
+          </g>
+          <g data-block-id="s07-write-nodes">
+            <rect
+              x="72"
+              y="408"
+              width="178"
+              height="84"
+              rx="6"
+              class="softBox"
+            />
+            <text x="161" y="440" text-anchor="middle" class="name14">
+              Preview + evidence
+            </text>
+            <text x="161" y="464" text-anchor="middle" class="mono">
+              snapshot · exact change
+            </text>
+            <rect
+              x="302"
+              y="408"
+              width="178"
+              height="84"
+              rx="6"
+              class="security"
+            />
+            <text x="391" y="440" text-anchor="middle" class="name14">
+              Human Host review
+            </text>
+            <text x="391" y="464" text-anchor="middle" class="mono">
+              approve exact revision
+            </text>
+            <rect
+              x="532"
+              y="408"
+              width="178"
+              height="84"
+              rx="6"
+              class="store"
+            />
+            <text x="621" y="440" text-anchor="middle" class="name14">
+              Native Decision
+            </text>
+            <text x="621" y="464" text-anchor="middle" class="mono">
+              CAS · one attempt
+            </text>
+            <rect
+              x="762"
+              y="408"
+              width="178"
+              height="84"
+              rx="6"
+              class="focus"
+            />
+            <text x="851" y="440" text-anchor="middle" class="name14">
+              Public API write
+            </text>
+            <text x="851" y="464" text-anchor="middle" class="mono">
+              editable metadata
+            </text>
+            <rect x="992" y="408" width="178" height="84" rx="6" class="box" />
+            <text x="1081" y="440" text-anchor="middle" class="name14">
+              Readback
+            </text>
+            <text x="1081" y="464" text-anchor="middle" class="mono">
+              current values verified
+            </text>
+          </g>
+          <text x="72" y="528" class="small">
+            任何 scope、schema、版本、權限或期限不符：停止；不自動重播已消耗或
+            UNKNOWN 的寫入。
+          </text>
+          <line x1="48" y1="638" x2="1232" y2="638" class="hair" />
+          <text x="48" y="666" class="footer">
+            DATA PLANE ≠ TRUST PLANE · INGESTION ≠ SOURCE ROW REPLICATION
+          </text>
+          <text x="1232" y="666" text-anchor="end" class="footer">07 / 10</text>
+        </svg>
+      </section>
+
+      <!-- 08 / Review lifecycle -->
+      <section class="slide" aria-label="08 受控語義工作流">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s08-title datahub-brief-s08-desc"
+        >
+          <title id="datahub-brief-s08-title">
+            Semantic Steward 的受控審核生命週期
+          </title>
+          <desc id="datahub-brief-s08-desc">
+            候選先綁定核准來源和精確
+            snapshot，再預覽差異並建立待審原生記錄；人類核准後才可執行單次條件寫入，最後從
+            DataHub 讀回確認。
+          </desc>
+          <defs>
+            <marker
+              id="s8-arrow"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#4f5d75" />
+            </marker>
+            <marker
+              id="s8-focus"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#eb6c36" />
+            </marker>
+          </defs>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="48" y="62" class="title">
+            語義發布：Human-in-the-loop，不讓 Agent 自核准
+          </text>
+          <text x="48" y="88" class="subtitle">
+            08 / REVIEW LIFECYCLE · REVISION-BOUND CONSENT AND READBACK
+          </text>
+          <g data-block-id="s08-flow">
+            <path d="M264 280 H296" class="flow" marker-end="url(#s8-arrow)" />
+            <path d="M496 280 H528" class="flow" marker-end="url(#s8-arrow)" />
+            <path d="M728 280 H760" class="flow" marker-end="url(#s8-arrow)" />
+            <path
+              d="M960 280 H992"
+              class="flowAccent"
+              marker-end="url(#s8-focus)"
+            />
+            <text x="280" y="220" text-anchor="middle" class="tiny">
+              SCOPE BOUND
+            </text>
+            <text x="512" y="220" text-anchor="middle" class="tiny">
+              PREVIEW READY
+            </text>
+            <text x="744" y="220" text-anchor="middle" class="tiny">
+              REVIEW CREATED
+            </text>
+            <text x="976" y="220" text-anchor="middle" class="tiny">
+              APPROVED
+            </text>
+          </g>
+          <g data-block-id="s08-stages">
+            <rect
+              x="64"
+              y="232"
+              width="200"
+              height="96"
+              rx="8"
+              class="external"
+            />
+            <text x="164" y="266" text-anchor="middle" class="name14">
+              Scope + Snapshot
+            </text>
+            <text x="164" y="292" text-anchor="middle" class="mono">
+              actor · source · dataset
+            </text>
+            <text x="164" y="312" text-anchor="middle" class="mono">
+              schema · digest · as_of
+            </text>
+            <rect
+              x="296"
+              y="232"
+              width="200"
+              height="96"
+              rx="8"
+              class="softBox"
+            />
+            <text x="396" y="266" text-anchor="middle" class="name14">
+              Preview
+            </text>
+            <text x="396" y="292" text-anchor="middle" class="mono">
+              PROPOSED / conflict
+            </text>
+            <text x="396" y="312" text-anchor="middle" class="mono">
+              no write
+            </text>
+            <rect
+              x="528"
+              y="232"
+              width="200"
+              height="96"
+              rx="8"
+              class="store"
+            />
+            <text x="628" y="266" text-anchor="middle" class="name14">
+              PENDING Review
+            </text>
+            <text x="628" y="292" text-anchor="middle" class="mono">
+              Task → Run → Decision
+            </text>
+            <text x="628" y="312" text-anchor="middle" class="mono">
+              planDigest · expiry
+            </text>
+            <rect
+              x="760"
+              y="232"
+              width="200"
+              height="96"
+              rx="8"
+              class="security"
+            />
+            <text x="860" y="266" text-anchor="middle" class="name14">
+              人類核准
+            </text>
+            <text x="860" y="292" text-anchor="middle" class="mono">
+              Host sidepanel
+            </text>
+            <text x="860" y="312" text-anchor="middle" class="mono">
+              exact revision only
+            </text>
+            <rect
+              x="992"
+              y="232"
+              width="200"
+              height="96"
+              rx="8"
+              class="focus"
+            />
+            <text x="1092" y="266" text-anchor="middle" class="name14">
+              CAS + Readback
+            </text>
+            <text x="1092" y="292" text-anchor="middle" class="mono">
+              one attempt
+            </text>
+            <text x="1092" y="312" text-anchor="middle" class="mono">
+              current values
+            </text>
+          </g>
+          <g data-block-id="s08-terminal-states">
+            <path
+              d="M628 328 V392 H390 V408"
+              class="flowDash"
+              marker-end="url(#s8-arrow)"
+            />
+            <text x="486" y="386" text-anchor="middle" class="tiny">
+              STALE / EXPIRED / ACL CHANGE
+            </text>
+            <rect x="72" y="408" width="318" height="94" rx="6" class="zone" />
+            <text x="96" y="440" class="eyebrow">STOP / RE-REVIEW</text>
+            <text x="96" y="472" class="name14">
+              Expired · stale · ACL changed · conflict
+            </text>
+            <text x="96" y="490" class="small">
+              不自動續期、不恢復舊批准、不盲目重試
+            </text>
+            <rect
+              x="456"
+              y="408"
+              width="318"
+              height="94"
+              rx="6"
+              class="softBox"
+            />
+            <text x="480" y="440" class="eyebrow">TECHNICAL OUTCOME</text>
+            <text x="480" y="472" class="name14">
+              PASS / FAIL / INCONCLUSIVE
+            </text>
+            <text x="480" y="490" class="small">
+              空樣本、timeout、來源離線不是 PASS
+            </text>
+            <rect
+              x="840"
+              y="408"
+              width="366"
+              height="94"
+              rx="6"
+              class="store"
+            />
+            <text x="864" y="440" class="eyebrow">
+              TRUST IS A SEPARATE STATE
+            </text>
+            <text x="864" y="472" class="name14">
+              驗證通過 ≠ 人工核准 ≠ 發布完成
+            </text>
+            <text x="864" y="490" class="small">
+              狀態以原生 record 和讀回證據判定
+            </text>
+          </g>
+          <line x1="48" y1="638" x2="1232" y2="638" class="hair" />
+          <text x="48" y="666" class="footer">
+            SAFETY CONTRACT · UNKNOWN EFFECTS ARE RECONCILED, NEVER REPLAYED
+          </text>
+          <text x="1232" y="666" text-anchor="end" class="footer">08 / 10</text>
+        </svg>
+      </section>
+
+      <!-- 09 / Integrated data model -->
+      <section class="slide" aria-label="09 整合後資料模型">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s09-title datahub-brief-s09-desc"
+        >
+          <title id="datahub-brief-s09-title">
+            整合後資料模型：原生實體上的受控擴充 Aspect
+          </title>
+          <desc id="datahub-brief-s09-desc">
+            客製模型不新增資料庫或全新實體；在原生 dataJob 和
+            dataProcessInstance 上擴充 ekopAgentTask 與 ekopAgentRun，並以
+            Dataset 原生 Aspect 作為語義發布目標。
+          </desc>
+          <defs>
+            <marker
+              id="s9-arrow"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#4f5d75" />
+            </marker>
+            <marker
+              id="s9-focus"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0,8 3,0 6" fill="#eb6c36" />
+            </marker>
+          </defs>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="48" y="62" class="title">
+            整合資料模型：擴充原生 Entity，不另建資料庫
+          </text>
+          <text x="48" y="88" class="subtitle">
+            09 / CUSTOM DATA MODEL · OFFICIAL MODEL / ASPECT EXTENSION
+          </text>
+          <g data-block-id="s09-relations">
+            <path d="M332 266 H390" class="flow" marker-end="url(#s9-arrow)" />
+            <path d="M664 266 H722" class="flow" marker-end="url(#s9-arrow)" />
+            <path
+              d="M528 372 V424"
+              class="flowAccent"
+              marker-end="url(#s9-focus)"
+            />
+            <path
+              d="M866 372 V424"
+              class="flowAccent"
+              marker-end="url(#s9-focus)"
+            />
+          </g>
+          <g data-block-id="s09-native-dataset">
+            <rect x="64" y="204" width="268" height="168" rx="8" class="box" />
+            <rect x="82" y="218" width="98" height="14" rx="2" class="tag" />
+            <text x="131" y="228" text-anchor="middle" class="tagText">
+              NATIVE DATASET
+            </text>
+            <text x="82" y="264" class="name">Dataset Entity</text>
+            <text x="82" y="292" class="mono">SchemaMetadata</text>
+            <text x="82" y="316" class="mono">DatasetProperties</text>
+            <text x="82" y="340" class="mono">EditableSchemaMetadata</text>
+            <text x="82" y="360" class="small">
+              approved target is exact field path
+            </text>
+          </g>
+          <g data-block-id="s09-task">
+            <rect
+              x="390"
+              y="204"
+              width="274"
+              height="168"
+              rx="8"
+              class="focus"
+            />
+            <rect x="408" y="218" width="106" height="14" rx="2" class="tag" />
+            <text x="461" y="228" text-anchor="middle" class="tagText">
+              DATAJOB + ASPECT
+            </text>
+            <text x="408" y="264" class="name14">ekopAgentTask</text>
+            <text x="408" y="292" class="mono">actor · agent · source</text>
+            <text x="408" y="316" class="mono">datasets · instructions</text>
+            <text x="408" y="340" class="mono">allowDecisions</text>
+            <text x="408" y="360" class="small">
+              scope is not execution authority
+            </text>
+          </g>
+          <g data-block-id="s09-run">
+            <rect
+              x="722"
+              y="204"
+              width="274"
+              height="168"
+              rx="8"
+              class="focus"
+            />
+            <rect x="740" y="218" width="124" height="14" rx="2" class="tag" />
+            <text x="802" y="228" text-anchor="middle" class="tagText">
+              PROCESSINSTANCE + ASPECT
+            </text>
+            <text x="740" y="264" class="name14">ekopAgentRun</text>
+            <text x="740" y="292" class="mono">
+              actor · source · taskVersion
+            </text>
+            <text x="740" y="316" class="mono">sessionId · decisions</text>
+            <text x="740" y="340" class="mono">closedAt (Host admission)</text>
+            <text x="740" y="360" class="small">
+              not proof that runtime has stopped
+            </text>
+          </g>
+          <g data-block-id="s09-decision">
+            <rect
+              x="1038"
+              y="204"
+              width="178"
+              height="168"
+              rx="8"
+              class="store"
+            />
+            <rect x="1054" y="218" width="78" height="14" rx="2" class="tag" />
+            <text x="1093" y="228" text-anchor="middle" class="tagText">
+              NESTED
+            </text>
+            <text x="1054" y="264" class="name14">Decision</text>
+            <text x="1054" y="292" class="mono">question</text>
+            <text x="1054" y="316" class="mono">review / response</text>
+            <text x="1054" y="340" class="mono">attempt / verdict</text>
+            <text x="1054" y="360" class="small">within Run aspect</text>
+          </g>
+          <g data-block-id="s09-notes">
+            <rect
+              x="390"
+              y="424"
+              width="384"
+              height="102"
+              rx="6"
+              class="security"
+            />
+            <text x="414" y="454" class="eyebrow">CAS / HISTORY</text>
+            <text x="414" y="484" class="name14">
+              Versioned conditional updates
+            </text>
+            <text x="414" y="506" class="small">
+              Decision and closure share a Run Aspect CAS
+            </text>
+            <rect
+              x="812"
+              y="424"
+              width="404"
+              height="102"
+              rx="6"
+              class="zone"
+            />
+            <text x="836" y="454" class="eyebrow">NO SECOND AUTHORITY</text>
+            <text x="836" y="484" class="name14">
+              No Extension PostgreSQL / SQLite
+            </text>
+            <text x="836" y="506" class="small">
+              DataHub records remain the workflow authority
+            </text>
+          </g>
+          <text x="64" y="580" class="body">
+            Task scope、Run owner、Decision revision、expiry 與 audit audience
+            仍由 Host 驗證；Aspect schema 本身不代表授權。
+          </text>
+          <line x1="48" y1="638" x2="1232" y2="638" class="hair" />
+          <text x="48" y="666" class="footer">
+            MODEL CONTRACT · EXTEND VIA SUPPORTED REGISTRY ZIP AND PUBLIC API
+          </text>
+          <text x="1232" y="666" text-anchor="end" class="footer">09 / 10</text>
+        </svg>
+      </section>
+
+      <!-- 10 / Delivery status and next gates -->
+      <section class="slide" aria-label="10 部署原則與驗收狀態">
+        <svg
+          viewBox="0 0 1280 720"
+          role="img"
+          aria-labelledby="datahub-brief-s10-title datahub-brief-s10-desc"
+        >
+          <title id="datahub-brief-s10-title">
+            部署原則、目前狀態與下一步驗收
+          </title>
+          <desc id="datahub-brief-s10-desc">
+            所有 Core 和映像版本固定；已完成真模型與 DataHub MCP 查詢及有限
+            Semantic Steward 讀回；Catalog 瀏覽器流程與來源 ingestion
+            閉環仍需繼續驗收。
+          </desc>
+          <rect width="1280" height="720" fill="#f5f5f5" />
+          <text x="48" y="62" class="title">交付原則與下一個驗收閘門</text>
+          <text x="48" y="88" class="subtitle">
+            10 / OPERATING MODEL · PINNED, READABLE, REVERSIBLE
+          </text>
+          <g data-block-id="s10-pinned">
+            <rect x="64" y="150" width="346" height="190" rx="8" class="box" />
+            <text x="88" y="182" class="eyebrow">PINNED PLATFORM</text>
+            <text x="88" y="220" class="name">Core / API Compatibility</text>
+            <text x="88" y="252" class="body">
+              DataHub v1.7.0.1 · CLI 1.7.0.9
+            </text>
+            <text x="88" y="276" class="body">容器映像使用 digest lock。</text>
+            <text x="88" y="310" class="mono">
+              NO FLOATING LATEST · NO CORE PATCH
+            </text>
+          </g>
+          <g data-block-id="s10-proven">
+            <rect
+              x="466"
+              y="150"
+              width="346"
+              height="190"
+              rx="8"
+              class="softBox"
+            />
+            <text x="490" y="182" class="eyebrow">VERIFIED EVIDENCE</text>
+            <text x="490" y="220" class="name">T01/T02 歷史真值證據</text>
+            <text x="490" y="252" class="body">
+              2026-09-12 Agent 入口完成 MCP 查詢；
+            </text>
+            <text x="490" y="276" class="body">
+              schema / lineage 讀回；token 已到期。
+            </text>
+            <text x="490" y="310" class="mono">
+              S1–S3 REVIEW / READBACK, LIMITED SCOPE
+            </text>
+          </g>
+          <g data-block-id="s10-open">
+            <rect
+              x="868"
+              y="150"
+              width="348"
+              height="190"
+              rx="8"
+              class="security"
+            />
+            <text x="892" y="182" class="eyebrow">OPEN ACCEPTANCE GATES</text>
+            <text x="892" y="220" class="name">Catalog B1/B2 / Ingestion</text>
+            <text x="892" y="252" class="body">
+              完整真 UI / Composer / ACL 測試、
+            </text>
+            <text x="892" y="276" class="body">
+              來源 ingestion 與 lineage 閉環仍未完成。
+            </text>
+            <text x="892" y="310" class="mono">
+              DO NOT EQUATE LOCAL READS WITH ACCEPTANCE
+            </text>
+          </g>
+          <text x="64" y="398" class="eyebrow">NEXT SEQUENCE</text>
+          <g data-block-id="s10-sequence">
+            <rect x="64" y="426" width="254" height="86" rx="6" class="store" />
+            <text x="86" y="458" class="name14">01 · 原生 Source 能力</text>
+            <text x="86" y="484" class="small">Secret / ingestion 實測</text>
+            <rect
+              x="342"
+              y="426"
+              width="254"
+              height="86"
+              rx="6"
+              class="store"
+            />
+            <text x="364" y="458" class="name14">02 · 真實 Ingestion</text>
+            <text x="364" y="484" class="small">
+              metadata scope + lineage readback
+            </text>
+            <rect
+              x="620"
+              y="426"
+              width="254"
+              height="86"
+              rx="6"
+              class="store"
+            />
+            <text x="642" y="458" class="name14">
+              03 · Registry / Task / Decision
+            </text>
+            <text x="642" y="484" class="small">原生能力與生命週期閉環</text>
+            <rect
+              x="898"
+              y="426"
+              width="318"
+              height="86"
+              rx="6"
+              class="focus"
+            />
+            <text x="920" y="458" class="name14">04 · 整合驗收</text>
+            <text x="920" y="484" class="small">
+              live UI · ACL · version · readback
+            </text>
+          </g>
+          <rect x="64" y="552" width="1152" height="48" rx="6" class="zone" />
+          <text x="88" y="582" class="body">
+            成功標準：可信 DataHub Agent 回應 → 原生 MCP 查詢 → 核對
+            metadata；未驗收項目保留為明確 gate，不以 mock 或 fixture 代替。
+          </text>
+          <line x1="48" y1="638" x2="1232" y2="638" class="hair" />
+          <text x="48" y="666" class="footer">
+            UPGRADE BY VERIFIED CONTRACT · ACCEPTANCE BY LIVE READBACK
+          </text>
+          <text x="1232" y="666" text-anchor="end" class="footer">10 / 10</text>
+        </svg>
+      </section>
+    </main>
+  </body>
+</html>

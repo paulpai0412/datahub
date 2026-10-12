@@ -39,6 +39,23 @@ public final class ModelRoundTripCheck {
     require(taskReadback.getInstructions().equals(task.getInstructions()), "Task instructions lost");
     require(taskReadback.getDatasets().size() == 1, "Task scope lost");
     require(taskReadback.isAllowDecisions(), "Decision default not retained");
+    require(!taskReadback.hasAssets(), "Legacy Task acquired invented Catalog scope");
+    var catalogTask = new EkopAgentTask(CODEC.stringToMap("""
+        {"actor":"urn:li:corpuser:task-model-check",
+         "agent":"urn:li:aiAgent:task-model-check",
+         "source":"urn:li:dataHubIngestionSource:task-model-check",
+         "datasets":[],
+         "assets":["urn:li:chart:(grafana,fixture)","urn:li:dashboard:(grafana,fixture)"],
+         "instructions":"Review exact Catalog changes; no fake Dataset identity."}
+        """));
+    valid(catalogTask);
+    var catalogReadback = new EkopAgentTask(CODEC.stringToMap(CODEC.mapToString(catalogTask.data())));
+    require(catalogReadback.getDatasets().isEmpty(), "Non-Dataset scope was rewritten");
+    require(catalogReadback.getAssets().equals(catalogTask.getAssets()), "Catalog Task scope lost");
+    var invalidAssets = CODEC.stringToMap(CODEC.mapToString(catalogTask.data()));
+    invalidAssets.put("assets", "not-an-array");
+    require(!ValidateDataAgainstSchema.validate(new EkopAgentTask(invalidAssets), OPTIONS).isValid(),
+        "Malformed Catalog scope accepted");
 
     DataMap invalidTask = CODEC.stringToMap(CODEC.mapToString(task.data()));
     invalidTask.remove("instructions");

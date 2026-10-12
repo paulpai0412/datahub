@@ -342,6 +342,9 @@ test("fixed ETL real CLI pipe crosses the Host CAS gate and records terminal res
           "fixed-etl-review.mjs",
           "publication-review.mjs",
           "semantic-preservation.mjs",
+          "semantic-catalog-contract.mjs",
+          "semantic-native-client.mjs",
+          "datahub-identity.mjs",
         ])
           copyFileSync(
             new URL(

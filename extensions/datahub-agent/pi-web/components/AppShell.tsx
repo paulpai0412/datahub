@@ -25,6 +25,8 @@ import {
   type GrafanaEmbed,
 } from "@/lib/grafana-embed-contract";
 import { DataHubGrafanaPanel } from "./DataHubGrafanaPanel";
+import { DataHubSemanticMaintenancePanel } from "./DataHubSemanticMaintenancePanel";
+import { MaintenancePanelContext } from "../lib/semantic-maintenance-panel-context";
 import type { ChatScrollPosition } from "@/lib/chat-scroll-position";
 import { FileViewer } from "./FileViewer";
 import { TabBar, type Tab } from "./TabBar";
@@ -270,6 +272,11 @@ export function AppShell() {
     open: false,
     trigger: null as HTMLElement | null,
   });
+  const [maintenanceEntry, setMaintenanceEntry] = useState<{
+    root: string; session: string; fileTab: string | null;
+  } | null>(null);
+  const [maintenanceExpanded, setMaintenanceExpanded] = useState(false);
+  const maintenanceReturn = useRef({ open: false, trigger: null as HTMLElement | null });
   const [mobileToolbarMoreOpen, setMobileToolbarMoreOpen] = useState(false);
   const [mobileSidebarReady, setMobileSidebarReady] = useState(false);
   const sidebarWidthRef = useRef(SIDEBAR_DEFAULT_WIDTH);
@@ -2795,6 +2802,7 @@ export function AppShell() {
         return;
       }
       setGrafanaEntry(null);
+      setMaintenanceEntry(null);
       if (!catalogSelection)
         catalogReturn.current = {
           open: rightPanelOpen,
@@ -2845,6 +2853,7 @@ export function AppShell() {
             : null,
       };
       setCatalogEntry(null);
+      setMaintenanceEntry(null);
       setGrafanaExpanded(false);
       setGrafanaEntry({
         embed,
@@ -2882,7 +2891,33 @@ export function AppShell() {
     rightPanelOpen,
   ]);
 
+  const maintenanceSelection = rightPanelOpen && maintenanceEntry?.session === catalogSession &&
+    maintenanceEntry.fileTab === activeFileTabId && !settingsSection && !catalogSelection && !grafanaSelection
+      ? maintenanceEntry.root : null;
+  const openMaintenance = useCallback((root: string | null) => {
+    if (!root) {
+      setMaintenanceEntry(null);
+      setRightPanelOpen(maintenanceReturn.current.open);
+      queueMicrotask(() => {
+        if (maintenanceReturn.current.trigger?.isConnected) maintenanceReturn.current.trigger.focus();
+        else chatInputRef.current?.focus();
+      });
+      return;
+    }
+    if (root.length > 1024 || !root.startsWith("urn:li:dataProcessInstance:")) return;
+    if (!maintenanceSelection) maintenanceReturn.current = { open: rightPanelOpen,
+      trigger: document.activeElement instanceof HTMLElement ? document.activeElement : null };
+    setCatalogEntry(null); setGrafanaEntry(null); setMaintenanceExpanded(false);
+    setMaintenanceEntry({ root, session: catalogSession, fileTab: activeFileTabId });
+    setRightPanelOpen(true);
+  }, [maintenanceSelection, catalogSession, activeFileTabId, rightPanelOpen]);
+  useEffect(() => {
+    if (maintenanceEntry && (maintenanceEntry.session !== catalogSession ||
+      maintenanceEntry.fileTab !== activeFileTabId || settingsSection || !rightPanelOpen)) setMaintenanceEntry(null);
+  }, [maintenanceEntry, catalogSession, activeFileTabId, settingsSection, rightPanelOpen]);
+
   return (
+    <MaintenancePanelContext.Provider value={DATAHUB_EMBED ? openMaintenance : null}>
     <GrafanaContext.Provider value={DATAHUB_EMBED ? openGrafana : null}>
       <CatalogContext.Provider value={DATAHUB_EMBED ? openCatalog : null}>
         <style>{`
@@ -4215,7 +4250,7 @@ export function AppShell() {
           <div
             ref={rightPanelResizer.panelRef}
             id="file-panel"
-            className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}${catalogSelection ? ` ${catalogStyles.panel}` : ""}${grafanaSelection ? ` ${grafanaStyles.workspace}${grafanaExpanded ? ` ${grafanaStyles.expanded}` : ""}` : ""}`}
+            className={`right-panel-container${rightPanelOpen ? " right-panel-open" : " right-panel-closed"}${rightPanelResizer.isResizing ? " right-panel-resizing" : ""}${catalogSelection ? ` ${catalogStyles.panel}` : ""}${grafanaSelection || maintenanceSelection ? ` ${grafanaStyles.workspace}${(grafanaSelection && grafanaExpanded) || (maintenanceSelection && maintenanceExpanded) ? ` ${grafanaStyles.expanded}` : ""}` : ""}`} 
             style={
               {
                 "--right-panel-width": `${rightPanelResizer.width}px`,
@@ -4226,6 +4261,12 @@ export function AppShell() {
               } as React.CSSProperties
             }
           >
+            {maintenanceSelection && (
+              <div className={grafanaStyles.slot}>
+                <DataHubSemanticMaintenancePanel root={maintenanceSelection} expanded={maintenanceExpanded}
+                  onExpandAction={() => setMaintenanceExpanded(v => !v)} onCloseAction={() => openMaintenance(null)} />
+              </div>
+            )}
             {grafanaSelection && (
               <div className={grafanaStyles.slot}>
                 <DataHubGrafanaPanel
@@ -4427,5 +4468,6 @@ export function AppShell() {
         )}
       </CatalogContext.Provider>
     </GrafanaContext.Provider>
+    </MaintenancePanelContext.Provider>
   );
 }
